@@ -9,7 +9,11 @@ on:
       build_run_id:
         description: 'build-macos.yml run ID whose DMG to test'
         required: true
-        default: '37100531801'
+        default: '37130571533'
+      runner:
+        description: 'macOS runner image to test on'
+        required: true
+        default: 'macos-15'
 
 permissions:
   contents: read
@@ -17,7 +21,7 @@ permissions:
 
 jobs:
   side-by-side:
-    runs-on: macos-15
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 30
     env:
       OFFICIAL_APP: /Applications/Blender.app
@@ -79,6 +83,7 @@ jobs:
 
       - name: Open official Blender, then the Mac build
         run: |
+          sw_vers
           open --stdout /tmp/official.log --stderr /tmp/official.log "$OFFICIAL_APP"
           sleep 30
           open --stdout /tmp/cah.log --stderr /tmp/cah.log "$CAH_APP"

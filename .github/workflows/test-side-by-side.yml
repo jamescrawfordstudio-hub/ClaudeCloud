@@ -1,0 +1,120 @@
+name: Test running alongside official Blender
+
+# Installs official Blender 5.2.2 next to the Mac build from a build-macos.yml
+# run, opens both at the same time, and reports which settings folder each uses.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'build-macos.yml run ID whose DMG to test'
+        required: true
+        default: '37100531801'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  side-by-side:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      OFFICIAL_APP: /Applications/Blender.app
+      CAH_APP: /Applications/Blender Viewport Motion Blur.app
+    steps:
+      - name: Download the Mac build
+        uses: actions/download-artifact@v4
+        with:
+          name: Cycles-After-Hours_Blender-5.2.2_Viewport-Motion-Blur-v0.2.1-macOS-arm64
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: artifact
+
+      - name: Install official Blender 5.2.2 and the Mac build
+        run: |
+          set -euo pipefail
+          base=https://download.blender.org/release/Blender5.2
+          curl -fsSL -o official.dmg "$base/blender-5.2.2-macos-arm64.dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/official official.dmg
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/cah artifact/*.dmg
+          ditto /Volumes/official/Blender.app "$OFFICIAL_APP"
+          ditto "/Volumes/cah/Blender Viewport Motion Blur.app" "$CAH_APP"
+          for app in "$OFFICIAL_APP" "$CAH_APP"; do
+            echo "$app"
+            echo "  bundle id: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
+            echo "  $("$app/Contents/MacOS/Blender" --version | head -1)"
+          done
+
+      - name: Where each app keeps its settings
+        run: |
+          expr='import bpy; print("USER  ", bpy.utils.resource_path("USER")); print("CONFIG", bpy.utils.user_resource("CONFIG")); print("TEMP  ", bpy.app.tempdir)'
+          for app in "$OFFICIAL_APP" "$CAH_APP"; do
+            echo "== $app"
+            "$app/Contents/MacOS/Blender" --background --factory-startup --python-expr "$expr" 2>&1 |
+              grep -E '^(USER|CONFIG|TEMP) '
+          done
+
+      # Two throwaway apps with the same bundle ID, to see whether macOS starts a
+      # second app or just brings the first one forward.
+      - name: macOS check with two tiny apps sharing one bundle ID
+        run: |
+          for x in AppA AppB; do
+            osacompile -s -o "/tmp/$x.app" -e 'on idle' -e 'return 30' -e 'end idle'
+            plist="/tmp/$x.app/Contents/Info.plist"
+            /usr/libexec/PlistBuddy -c 'Set :CFBundleIdentifier com.example.same-id-test' "$plist" ||
+              /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.example.same-id-test' "$plist"
+            codesign --force --sign - "/tmp/$x.app"
+          done
+          open /tmp/AppA.app
+          sleep 5
+          open /tmp/AppB.app
+          sleep 5
+          ps -axo pid,command | grep -E '/tmp/App[AB]\.app/' | grep -v grep || true
+          echo "Tiny apps running: $(pgrep -f '/tmp/App[AB].app/' | wc -l | tr -d ' ') of 2"
+          pkill -f '/tmp/App[AB].app/' || true
+
+      - name: Open official Blender, then the Mac build
+        run: |
+          open --stdout /tmp/official.log --stderr /tmp/official.log "$OFFICIAL_APP"
+          sleep 30
+          open --stdout /tmp/cah.log --stderr /tmp/cah.log "$CAH_APP"
+          sleep 30
+          echo "--- Blender processes"
+          ps -axo pid,etime,command | grep 'Contents/MacOS/Blender' | grep -v grep || true
+          echo "--- LaunchServices view"
+          lsappinfo list | grep -i -A4 'blender' || true
+          screencapture -x side-by-side.png || true
+          echo "--- official Blender output"; tail -n 15 /tmp/official.log || true
+          echo "--- Mac build output"; tail -n 15 /tmp/cah.log || true
+          echo "Blender processes running: $(pgrep -f 'Contents/MacOS/Blender' | wc -l | tr -d ' ') of 2"
+          pkill -f 'Contents/MacOS/Blender' || true
+          sleep 3
+
+      - name: Optional separate settings via a portable folder
+        run: |
+          mkdir "$CAH_APP/Contents/Resources/portable"
+          "$CAH_APP/Contents/MacOS/Blender" --background \
+            --python-expr 'import bpy; print("USER  ", bpy.utils.resource_path("USER")); bpy.ops.wm.save_userpref()' 2>&1 |
+            grep -E '^USER |[Ss]aved|rror' || true
+          echo "--- files written inside the app bundle"
+          find "$CAH_APP/Contents/Resources/portable" | head -20
+          echo "--- code signature after the change"
+          codesign --verify --deep --strict --verbose=2 "$CAH_APP" 2>&1 | tail -n 5 || true
+          echo "--- official Blender still uses:"
+          "$OFFICIAL_APP/Contents/MacOS/Blender" --background --factory-startup \
+            --python-expr 'import bpy; print("USER  ", bpy.utils.resource_path("USER"))' 2>&1 | grep '^USER ' || true
+          open --stdout /tmp/cah2.log --stderr /tmp/cah2.log "$CAH_APP"
+          sleep 30
+          echo "Mac build running after the change: $(pgrep -f 'Blender Viewport Motion Blur.app/Contents/MacOS/Blender' | wc -l | tr -d ' ')"
+          tail -n 15 /tmp/cah2.log || true
+          pkill -f 'Contents/MacOS/Blender' || true
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: side-by-side-screenshot
+          path: side-by-side.png
+          if-no-files-found: ignore
+          retention-days: 30

@@ -16,6 +16,8 @@ upstream changes in 5.3:
   `RE_WRITE_VIEWPORT_DEPTH` support and a header redraw when the viewport render
   engine is created. The port keeps both, and moves the header redraw into
   `init()` together with the engine creation that the patch moved there.
+- **0004:** `BKE_animsys.h` was renamed to `BKE_animsys.hh` in 5.3. Every other
+  Blender API the patches call still exists with a compatible signature.
 
 Generated with `git format-patch` from a branch where they apply in order with
 `git am`. Build with `TARGET=5.3 ../scripts/build-macos.sh`.

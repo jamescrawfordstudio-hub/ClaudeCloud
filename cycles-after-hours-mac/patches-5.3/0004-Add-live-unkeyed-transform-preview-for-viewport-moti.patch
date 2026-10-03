@@ -26,14 +26,14 @@ index 50828515..83981d46 100644
    PRIVATE bf::depsgraph
    PRIVATE bf::blenlib
 diff --git a/intern/cycles/blender/object.cpp b/intern/cycles/blender/object.cpp
-index 70c486c6..aefbee0d 100644
+index 70c486c6..8f2e7b7b 100644
 --- a/intern/cycles/blender/object.cpp
 +++ b/intern/cycles/blender/object.cpp
 @@ -24,10 +24,19 @@
  #include "util/task.h"
  
  #include "BKE_duplilist.hh"
-+#include "BKE_animsys.h"
++#include "BKE_animsys.hh"
  #include "BKE_layer.hh"
 +#include "BKE_lib_id.hh"
 +#include "BKE_main.hh"

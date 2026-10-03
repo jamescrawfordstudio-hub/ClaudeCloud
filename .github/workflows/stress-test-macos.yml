@@ -1,0 +1,147 @@
+name: Stress test the Mac build
+
+# Long-running stability and safety test of the Mac build on an Apple Silicon
+# runner, next to official Blender 5.2.2: real Rendered-viewport sessions on
+# CPU and Metal, final renders, a .blend round trip, and an audit of every
+# file Blender writes, its network use, and anything left running afterwards.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: 'build-macos.yml run ID whose DMG to test'
+        required: true
+        default: '37129132092'
+      viewport_seconds:
+        description: 'Seconds of viewport stress per session'
+        required: true
+        default: '600'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  stress:
+    runs-on: macos-15
+    timeout-minutes: 180
+    env:
+      OFFICIAL_APP: /Applications/Blender.app
+      PATCHED_APP: /Applications/Blender Viewport Motion Blur.app
+      OUT: ${{ github.workspace }}/stress-out
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the Mac build
+        uses: actions/download-artifact@v4
+        with:
+          name: Cycles-After-Hours_Blender-5.2.2_Viewport-Motion-Blur-v0.2.1-macOS-arm64
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+          path: artifact
+
+      - name: Install official Blender 5.2.2 and the Mac build
+        run: |
+          set -euo pipefail
+          curl -fsSL -o official.dmg https://download.blender.org/release/Blender5.2/blender-5.2.2-macos-arm64.dmg
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/official official.dmg >/dev/null
+          hdiutil attach -nobrowse -readonly -mountpoint /Volumes/cah artifact/*.dmg >/dev/null
+          ditto /Volumes/official/Blender.app "$OFFICIAL_APP"
+          ditto "/Volumes/cah/Blender Viewport Motion Blur.app" "$PATCHED_APP"
+          echo "Mac build signature as shipped:"
+          codesign --verify --deep --strict --verbose=2 "$PATCHED_APP"
+          mkdir -p "$OUT"
+
+      - name: Snapshot startup items before testing
+        run: |
+          snapshot() {
+            for dir in ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons \
+                       /Library/PrivilegedHelperTools /Library/StartupItems; do
+              echo "== $dir"; ls -la "$dir" 2>&1
+            done
+            echo "== crontab"; crontab -l 2>&1
+            echo "== login items"; sudo sfltool dumpbtm 2>/dev/null | grep -iE 'blender|^ *Name' || true
+          }
+          snapshot > "$OUT/startup-before.txt"
+          echo "snapshot saved"
+
+      - name: Start file and network monitors
+        run: |
+          sudo fs_usage -w -f filesys Blender > "$OUT/fs_usage.log" 2>&1 &
+          echo $! > "$OUT/fs_usage.pid"
+          (while true; do
+             date -u +%H:%M:%S
+             lsof -nP -iTCP -iUDP -a -c Blender 2>/dev/null
+             sleep 5
+           done) > "$OUT/network.log" 2>&1 &
+          echo $! > "$OUT/network.pid"
+          sleep 3
+
+      - name: Run stress tests
+        timeout-minutes: 150
+        run: |
+          chmod +x cycles-after-hours-mac/tests/run-stress-macos.sh
+          cycles-after-hours-mac/tests/run-stress-macos.sh "$PATCHED_APP" "$OFFICIAL_APP" "$OUT" "${{ inputs.viewport_seconds }}"
+
+      - name: Audit what Blender did to the system
+        if: always()
+        run: |
+          sudo kill "$(cat "$OUT/fs_usage.pid")" 2>/dev/null || true
+          kill "$(cat "$OUT/network.pid")" 2>/dev/null || true
+          sleep 2
+          {
+            echo "== Files written by Blender"
+            python3 cycles-after-hours-mac/tests/summarize_fs_usage.py "$OUT/fs_usage.log" "$HOME" "$TMPDIR" "$OUT"
+            echo
+            echo "== Network connections by Blender"
+            conns=$(grep -c 'Blender' "$OUT/network.log" || true)
+            echo "lsof samples showing a Blender socket: $conns"
+            grep 'Blender' "$OUT/network.log" | sort -u | head -20 || true
+            echo
+            echo "== Startup items before vs after"
+            snapshot() {
+              for dir in ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons \
+                         /Library/PrivilegedHelperTools /Library/StartupItems; do
+                echo "== $dir"; ls -la "$dir" 2>&1
+              done
+              echo "== crontab"; crontab -l 2>&1
+              echo "== login items"; sudo sfltool dumpbtm 2>/dev/null | grep -iE 'blender|^ *Name' || true
+            }
+            snapshot > "$OUT/startup-after.txt"
+            if diff "$OUT/startup-before.txt" "$OUT/startup-after.txt"; then echo "No change."; fi
+            echo
+            echo "== Blender processes still running after the tests"
+            pgrep -fl 'Contents/MacOS/Blender' || echo "None."
+            echo
+            echo "== Crash reports"
+            ls -la ~/Library/Logs/DiagnosticReports 2>/dev/null | grep -i blender || echo "No macOS crash reports for Blender."
+            ls -la "$TMPDIR"/*.crash.txt /tmp/*.crash.txt 2>/dev/null || echo "No Blender crash logs."
+            echo
+            echo "== GPU resets reported by macOS during the run"
+            log show --style compact --last 3h --predicate 'eventMessage CONTAINS[c] "GPU Restart" OR eventMessage CONTAINS[c] "gpu hang" OR eventMessage CONTAINS[c] "GPU timeout"' 2>/dev/null | tail -n 10
+            echo
+            echo "== Signatures after all tests (Blender writes Python caches into its own app,"
+            echo "   so official Blender is shown for comparison)"
+            for app in "$PATCHED_APP" "$OFFICIAL_APP"; do
+              echo "-- $app"
+              codesign --verify --deep --strict "$app" 2>&1 | tail -n 2 || true
+            done
+          } | tee "$OUT/audit.txt"
+
+      - name: Results
+        if: always()
+        run: |
+          echo "================ STRESS RESULTS ================"
+          cat "$OUT/results.txt" 2>/dev/null || echo "no results file"
+
+      - name: Upload logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stress-test-results
+          path: |
+            stress-out/*.txt
+            stress-out/*.json
+            stress-out/*.png
+          retention-days: 30
+          if-no-files-found: warn

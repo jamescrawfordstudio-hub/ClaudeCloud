@@ -3,3 +3,4 @@ cycles-after-hours-mac/work/
 cycles-after-hours-mac/dist/
 .ccache/
 .DS_Store
+__pycache__/

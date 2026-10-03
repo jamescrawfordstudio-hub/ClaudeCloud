@@ -54,6 +54,9 @@ def bucket(path, depth=6):
     return "/".join(shown.split("/")[:depth])
 
 
+if not os.path.exists(log_path):
+    sys.exit(f"No fs_usage log at {log_path}; the file monitor did not run.")
+
 counts = collections.Counter()
 unexpected = collections.Counter()
 lines = 0

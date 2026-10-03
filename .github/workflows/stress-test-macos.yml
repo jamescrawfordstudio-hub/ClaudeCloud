@@ -53,17 +53,7 @@ jobs:
           mkdir -p "$OUT"
 
       - name: Snapshot startup items before testing
-        run: |
-          snapshot() {
-            for dir in ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons \
-                       /Library/PrivilegedHelperTools /Library/StartupItems; do
-              echo "== $dir"; ls -la "$dir" 2>&1
-            done
-            echo "== crontab"; crontab -l 2>&1
-            echo "== login items"; sudo sfltool dumpbtm 2>/dev/null | grep -iE 'blender|^ *Name' || true
-          }
-          snapshot > "$OUT/startup-before.txt"
-          echo "snapshot saved"
+        run: bash cycles-after-hours-mac/tests/snapshot_startup_items.sh > "$OUT/startup-before.txt"
 
       - name: Start file and network monitors
         run: |
@@ -99,15 +89,7 @@ jobs:
             grep 'Blender' "$OUT/network.log" | sort -u | head -20 || true
             echo
             echo "== Startup items before vs after"
-            snapshot() {
-              for dir in ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons \
-                         /Library/PrivilegedHelperTools /Library/StartupItems; do
-                echo "== $dir"; ls -la "$dir" 2>&1
-              done
-              echo "== crontab"; crontab -l 2>&1
-              echo "== login items"; sudo sfltool dumpbtm 2>/dev/null | grep -iE 'blender|^ *Name' || true
-            }
-            snapshot > "$OUT/startup-after.txt"
+            bash cycles-after-hours-mac/tests/snapshot_startup_items.sh > "$OUT/startup-after.txt"
             if diff "$OUT/startup-before.txt" "$OUT/startup-after.txt"; then echo "No change."; fi
             echo
             echo "== Blender processes still running after the tests"

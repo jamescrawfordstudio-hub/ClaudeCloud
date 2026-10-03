@@ -1,17 +1,17 @@
-Blender 5.2.2 LTS + Cycles After Hours Viewport Motion Blur v0.2.1
+Blender @BLENDER_LABEL@ + Cycles After Hours Viewport Motion Blur v0.2.1
 for Apple Silicon Macs (M1 or newer, macOS 11.2 or later)
 
 INSTALL
-1. Drag "Blender Viewport Motion Blur" into the Applications folder.
+1. Drag "@APP_NAME@" into the Applications folder.
    It has its own name, so it will not replace a normal Blender install.
 
 2. The first time, macOS will refuse to open it because this build is not
    signed by an Apple-registered developer. To allow it:
      - Double-click the app and click "Done" on the warning, then
      - open System Settings > Privacy & Security, scroll down and click
-       "Open Anyway" next to "Blender Viewport Motion Blur".
+       "Open Anyway" next to "@APP_NAME@".
    Or, in Terminal:
-     xattr -dr com.apple.quarantine "/Applications/Blender Viewport Motion Blur.app"
+     xattr -dr com.apple.quarantine "/Applications/@APP_NAME@.app"
 
 USE
 1. Choose Cycles as the render engine.
@@ -24,11 +24,15 @@ Metal. The first Metal render compiles kernels and can take a few minutes.
 
 NOTES
 - This is an unofficial build, not affiliated with the Blender Foundation.
-- It shares preferences and add-ons with any other Blender 5.2 install.
+- It shares preferences and add-ons with any official Blender of the same
+  version (for example 5.2 with 5.2), because both use the same settings
+  folder: ~/Library/Application Support/Blender/<version>.
 - The upstream patches were tested on Windows with CPU, CUDA and OptiX.
   The Mac build uses the same code, but Metal has not been tested by the
   patch author.
+- An "alpha" Blender is a development snapshot: expect bugs, and keep
+  backups of files you open with it.
 
 Source: https://github.com/BramGunst/cycles-after-hours (patches)
-        https://projects.blender.org/blender/blender (Blender v5.2.2)
+        https://github.com/blender/blender (Blender)
 License: GPL-3.0-or-later (license files are inside the app bundle).

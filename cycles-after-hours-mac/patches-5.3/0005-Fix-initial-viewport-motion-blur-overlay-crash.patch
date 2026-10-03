@@ -1,0 +1,67 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Bram Gunst <bram.gunst@gmail.com>
+Date: Tue, 22 Sep 2026 21:00:58 +0200
+Subject: [PATCH 5/5] Fix initial viewport motion blur overlay crash
+
+---
+ .../draw/engines/external/external_engine.cc  | 38 ++++++++++---------
+ 1 file changed, 21 insertions(+), 17 deletions(-)
+
+diff --git a/source/blender/draw/engines/external/external_engine.cc b/source/blender/draw/engines/external/external_engine.cc
+index 1c234d3c..846fe934 100644
+--- a/source/blender/draw/engines/external/external_engine.cc
++++ b/source/blender/draw/engines/external/external_engine.cc
+@@ -227,6 +227,25 @@ class Instance : public DrawEngine {
+          RE_WRITE_VIEWPORT_DEPTH);
+     do_prepass = !engine_provides_depth &&
+                  DRW_render_check_grease_pencil(draw_ctx->depsgraph, draw_ctx->v3d);
++
++    /* Synchronize the external renderer before populating draw caches. Its first update
++     * can evaluate geometry (for example, Cycles shutter samples), invalidating batches
++     * that the overlay and depth passes would otherwise already reference. */
++    RegionView3D *rv3d = draw_ctx->rv3d;
++    if (rv3d && !rv3d->view_render) {
++      RenderEngineType *engine_type = ED_view3d_engine_type(draw_ctx->scene,
++                                                           draw_ctx->v3d->shading.type);
++      if (engine_type->view_update && engine_type->view_draw) {
++        rv3d->view_render = RE_NewViewRender(engine_type);
++        RenderEngine *render_engine = RE_view_engine_get(rv3d->view_render);
++
++        if (ScrArea *area = CTX_wm_area(draw_ctx->evil_C)) {
++          ED_area_tag_redraw_regiontype(area, RGN_TYPE_HEADER);
++        }
++
++        engine_type->view_update(render_engine, draw_ctx->evil_C, draw_ctx->depsgraph);
++      }
++    }
+   }
+ 
+   void begin_sync() final
+@@ -266,25 +285,10 @@ class Instance : public DrawEngine {
+      * (matching previous Blender versions) */
+     GPU_apply_state();
+ 
+-    /* Create render engine. */
+-    RenderEngine *render_engine = nullptr;
+     if (!rv3d->view_render) {
+-      if (!(engine_type->view_update && engine_type->view_draw)) {
+-        return;
+-      }
+-
+-      rv3d->view_render = RE_NewViewRender(engine_type);
+-      render_engine = RE_view_engine_get(rv3d->view_render);
+-
+-      if (ScrArea *area = CTX_wm_area(draw_ctx->evil_C)) {
+-        ED_area_tag_redraw_regiontype(area, RGN_TYPE_HEADER);
+-      }
+-
+-      engine_type->view_update(render_engine, draw_ctx->evil_C, draw_ctx->depsgraph);
+-    }
+-    else {
+-      render_engine = RE_view_engine_get(rv3d->view_render);
++      return;
+     }
++    RenderEngine *render_engine = RE_view_engine_get(rv3d->view_render);
+ 
+     /* Rendered draw. */
+     GPU_matrix_push_projection();

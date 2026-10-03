@@ -1,25 +1,50 @@
 #!/usr/bin/env bash
 #
-# Build Blender 5.2.2 LTS with the Cycles After Hours "Viewport Motion Blur"
-# patches (v0.2.1) for Apple Silicon Macs, and package it as a .dmg.
+# Build Blender with the Cycles After Hours "Viewport Motion Blur" patches
+# (v0.2.1) for Apple Silicon Macs, and package it as a .dmg.
 #
 # Requirements: macOS on Apple Silicon, Xcode 16+ or its Command Line Tools,
 # and `brew install cmake git-lfs ninja` (ccache is optional).
 #
 # Environment overrides:
-#   WORK_DIR      sources and build files (default: ../work, needs ~35 GB)
+#   TARGET        5.2.2 (default; Blender 5.2.2 LTS with the upstream patches)
+#                 or 5.3 (Blender 5.3 alpha with the patches ported in patches-5.3)
+#   WORK_DIR      sources and build files (default: ../work, needs ~35 GB per target)
 #   DIST_DIR      where the finished .dmg goes (default: ../dist)
 #   NPROCS        parallel compile jobs (default: all cores)
-#   BLENDER_REPO  Blender Git URL (default: projects.blender.org)
+#   BLENDER_REPO  Blender Git URL to fetch the exact commit from (default: GitHub mirror)
 
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT="$(dirname "$HERE")"
 
-BLENDER_REPO="${BLENDER_REPO:-https://projects.blender.org/blender/blender.git}"
-BLENDER_TAG="v5.2.2"
-BLENDER_COMMIT="d13f752e3b9c4f8c261cda552b1021f8bcc0382c"
+step() { printf '\n==> %s\n' "$*"; }
+die() { printf '\nerror: %s\n' "$*" >&2; exit 1; }
+
+TARGET="${TARGET:-5.2.2}"
+case "$TARGET" in
+  5.2.2)
+    BLENDER_COMMIT="d13f752e3b9c4f8c261cda552b1021f8bcc0382c" # tag v5.2.2
+    BLENDER_LABEL="5.2.2"
+    PATCH_DIR="$PROJECT/patches"
+    APP_NAME="Blender Viewport Motion Blur"
+    SUFFIX=""
+    ;;
+  5.3)
+    BLENDER_COMMIT="3a8dfe8e58d9a6bdbbd2812e8d5aa1169749d5a5" # main, 5.3 alpha
+    BLENDER_LABEL="5.3-alpha"
+    PATCH_DIR="$PROJECT/patches-5.3"
+    APP_NAME="Blender 5.3 Alpha Viewport Motion Blur"
+    SUFFIX="-5.3"
+    ;;
+  *) die "unknown TARGET '$TARGET' (use 5.2.2 or 5.3)" ;;
+esac
+
+# The GitHub mirror can fetch an exact commit; Git LFS files come from
+# projects.blender.org, which the mirror does not host.
+BLENDER_REPO="${BLENDER_REPO:-https://github.com/blender/blender.git}"
+BLENDER_LFS_URL="https://projects.blender.org/blender/blender.git/info/lfs"
 FEATURE_VERSION="0.2.1"
 LAST_PATCH_SUBJECT="Fix initial viewport motion blur overlay crash"
 
@@ -27,14 +52,10 @@ WORK_DIR="${WORK_DIR:-$PROJECT/work}"
 DIST_DIR="${DIST_DIR:-$PROJECT/dist}"
 NPROCS="${NPROCS:-$(sysctl -n hw.ncpu)}"
 
-SRC="$WORK_DIR/blender"
-BUILD="$WORK_DIR/build"
-STAGE="$WORK_DIR/package"
-APP_NAME="Blender Viewport Motion Blur"
-PACKAGE_NAME="Cycles-After-Hours_Blender-5.2.2_Viewport-Motion-Blur-v${FEATURE_VERSION}-macOS-arm64"
-
-step() { printf '\n==> %s\n' "$*"; }
-die() { printf '\nerror: %s\n' "$*" >&2; exit 1; }
+SRC="$WORK_DIR/blender$SUFFIX"
+BUILD="$WORK_DIR/build$SUFFIX"
+STAGE="$WORK_DIR/package$SUFFIX"
+PACKAGE_NAME="Cycles-After-Hours_Blender-${BLENDER_LABEL}_Viewport-Motion-Blur-v${FEATURE_VERSION}-macOS-arm64"
 
 check_requirements() {
   step "Checking requirements"
@@ -50,10 +71,14 @@ check_requirements() {
 
 fetch_source() {
   if [[ ! -d "$SRC/.git" ]]; then
-    step "Downloading Blender $BLENDER_TAG source"
-    mkdir -p "$WORK_DIR"
-    GIT_LFS_SKIP_SMUDGE=1 git clone --depth 1 --branch "$BLENDER_TAG" "$BLENDER_REPO" "$SRC"
+    step "Downloading Blender $BLENDER_LABEL source ($BLENDER_COMMIT)"
+    mkdir -p "$SRC"
+    git -C "$SRC" init -q
+    git -C "$SRC" remote add origin "$BLENDER_REPO"
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$SRC" fetch --depth 1 origin "$BLENDER_COMMIT"
+    GIT_LFS_SKIP_SMUDGE=1 git -C "$SRC" checkout -q FETCH_HEAD
   fi
+  git -C "$SRC" config lfs.url "$BLENDER_LFS_URL"
   # The ~800 MB of regression test files are not needed to build Blender.
   git -C "$SRC" config lfs.fetchexclude "tests/**"
 }
@@ -65,11 +90,11 @@ apply_patches() {
     return
   fi
   [[ "$(git -C "$SRC" rev-parse HEAD)" == "$BLENDER_COMMIT" ]] ||
-    die "$SRC is not at Blender $BLENDER_TAG ($BLENDER_COMMIT); delete it and run again"
+    die "$SRC is not at Blender $BLENDER_LABEL ($BLENDER_COMMIT); delete it and run again"
 
-  step "Applying Viewport Motion Blur v$FEATURE_VERSION patches"
+  step "Applying Viewport Motion Blur v$FEATURE_VERSION patches from $PATCH_DIR"
   if ! git -C "$SRC" -c user.name="Cycles After Hours build" -c user.email="build@localhost" \
-    am "$PROJECT"/patches/*.patch; then
+    am "$PATCH_DIR"/*.patch; then
     git -C "$SRC" am --abort || true
     die "a patch did not apply cleanly"
   fi
@@ -157,7 +182,8 @@ package() {
   sign_app "$app"
   smoke_test "$app"
   ln -s /Applications "$STAGE/Applications"
-  cp "$PROJECT/READ ME FIRST.txt" "$STAGE/"
+  sed -e "s/@APP_NAME@/$APP_NAME/g" -e "s/@BLENDER_LABEL@/$BLENDER_LABEL/g" \
+    "$PROJECT/READ ME FIRST.txt" >"$STAGE/READ ME FIRST.txt"
 
   rm -f "$dmg"
   # hdiutil sometimes fails with "Resource busy" on CI machines, so retry.

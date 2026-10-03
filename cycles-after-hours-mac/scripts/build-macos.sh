@@ -115,15 +115,33 @@ sign_app() {
     fi
   done < <(find "$app/Contents" -type f \( -perm -0100 -o -name '*.dylib' -o -name '*.so' \) -print0)
   codesign --force --sign - --preserve-metadata=entitlements "$app"
-  codesign --verify --deep --strict --verbose=2 "$app" ||
-    echo "warning: strict signature verification reported problems (see above)"
+  codesign --verify --deep --strict --verbose=2 "$app" || die "code signature of $app is invalid"
 }
 
+# Runs a copy, because Blender writes Python __pycache__ files into its own
+# bundle, which would break the signature of the app that gets shipped.
 smoke_test() {
-  local app="$1"
-  step "Smoke testing the packaged app"
-  "$app/Contents/MacOS/Blender" --background --factory-startup --python-exit-code 1 \
+  local app="$1" copy="$WORK_DIR/smoke-test/$APP_NAME.app"
+  step "Smoke testing a copy of the packaged app"
+  rm -rf "$WORK_DIR/smoke-test"
+  mkdir -p "$WORK_DIR/smoke-test"
+  ditto "$app" "$copy"
+  "$copy/Contents/MacOS/Blender" --background --factory-startup --python-exit-code 1 \
     --python "$HERE/smoke_test.py"
+  rm -rf "$WORK_DIR/smoke-test"
+}
+
+# Checks the app exactly as users will get it: inside the finished DMG.
+verify_dmg() {
+  local dmg="$1" mount
+  step "Verifying the code signature inside the DMG"
+  mount="$(mktemp -d)"
+  hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" >/dev/null
+  if ! codesign --verify --deep --strict --verbose=2 "$mount/$APP_NAME.app"; then
+    hdiutil detach "$mount" >/dev/null || true
+    die "the app inside $dmg has an invalid code signature"
+  fi
+  hdiutil detach "$mount" >/dev/null
 }
 
 package() {
@@ -153,6 +171,7 @@ package() {
     fi
     sleep $((attempt * 5))
   done
+  verify_dmg "$dmg"
   (cd "$DIST_DIR" && shasum -a 256 "$PACKAGE_NAME.dmg" | tee "$PACKAGE_NAME.dmg.sha256")
   step "Done: $dmg"
 }

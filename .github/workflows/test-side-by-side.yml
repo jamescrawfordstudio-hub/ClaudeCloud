@@ -40,6 +40,9 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint /Volumes/cah artifact/*.dmg
           ditto /Volumes/official/Blender.app "$OFFICIAL_APP"
           ditto "/Volumes/cah/Blender Viewport Motion Blur.app" "$CAH_APP"
+          echo "--- Mac build code signature, as shipped (before it has ever run)"
+          echo "__pycache__ folders in bundle: $(find "$CAH_APP" -type d -name __pycache__ | wc -l | tr -d ' ')"
+          codesign --verify --deep --strict --verbose=2 "$CAH_APP" 2>&1 | tail -n 5 || true
           for app in "$OFFICIAL_APP" "$CAH_APP"; do
             echo "$app"
             echo "  bundle id: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"

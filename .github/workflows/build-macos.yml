@@ -1,0 +1,90 @@
+name: Build Blender Viewport Motion Blur for macOS
+
+on:
+  push:
+    paths:
+      - 'cycles-after-hours-mac/patches/**'
+      - 'cycles-after-hours-mac/scripts/**'
+      - 'cycles-after-hours-mac/READ ME FIRST.txt'
+      - '.github/workflows/build-macos.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: build-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: macOS arm64
+    runs-on: macos-15
+    timeout-minutes: 360
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 5G
+      CCACHE_COMPRESS: 'true'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          brew install ninja ccache
+          git lfs version
+          cmake --version | head -1
+          xcodebuild -version
+
+      # A Blender build needs roughly 35 GB. Remove large preinstalled SDKs
+      # this job does not use, and spare Xcode versions only if still short.
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf ~/Library/Android /usr/local/share/dotnet ~/.dotnet /Users/runner/hostedtoolcache || true
+          free_gb=$(df -g / | awk 'NR==2 {print $4}')
+          if [ "$free_gb" -lt 50 ]; then
+            active="$(cd "$(xcode-select -p)/../.." && pwd -P)"
+            for xcode in /Applications/Xcode*.app; do
+              if [ ! -L "$xcode" ] && [ "$(cd "$xcode" && pwd -P)" != "$active" ]; then
+                sudo rm -rf "$xcode" &
+              fi
+            done
+            wait
+          fi
+          df -h /
+
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-macos-arm64-${{ github.run_id }}
+          restore-keys: ccache-macos-arm64-
+
+      - name: Build
+        timeout-minutes: 320
+        run: |
+          mkdir -p "$CCACHE_DIR"
+          ccache -z
+          cycles-after-hours-mac/scripts/build-macos.sh
+
+      - name: Compiler cache stats
+        if: always()
+        run: ccache -s || true
+
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-macos-arm64-${{ github.run_id }}
+
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Cycles-After-Hours_Blender-5.2.2_Viewport-Motion-Blur-v0.2.1-macOS-arm64
+          path: cycles-after-hours-mac/dist/*
+          compression-level: 0
+          retention-days: 90
+          if-no-files-found: error

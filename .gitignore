@@ -1,0 +1,5 @@
+# Build outputs from cycles-after-hours-mac/scripts/build-macos.sh
+cycles-after-hours-mac/work/
+cycles-after-hours-mac/dist/
+.ccache/
+.DS_Store

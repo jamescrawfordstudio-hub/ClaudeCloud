@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.1.0
+    MarkerTitler  v1.2.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.1.0"
+local SCRIPT_VERSION = "1.2.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -342,7 +342,7 @@ local function buildPlan(ctx, opts)
             if not (src.start and src.dur and left) then
                 plan.skipped[#plan.skipped + 1] = string.format("V%d %s: %d marker(s) - clip has no source range (generator/compound?)", src.track, name, #frames)
             else
-                local clip = { name = name, track = src.track, start = src.start, dur = src.dur, uid = uid, markers = {} }
+                local clip = { name = name, track = src.track, start = src.start, dur = src.dur, uid = uid, item = item, markers = {} }
                 for _, f in ipairs(frames) do
                     local m = markers[f]
                     plan.markerCount = plan.markerCount + 1
@@ -520,8 +520,6 @@ local function templateFrames(clip)
     return nil
 end
 
-local diagnosePlacement
-
 local function lengthFixLines(frames, needed)
     return {
         string.format("Your Text+ template in the Media Pool is %s frames long, but the longest clip needs %d.",
@@ -588,52 +586,95 @@ local function generate(ctx, plan, opts, log)
         return nil
     end
 
-    -- Works out why the first placement failed and says how to fix it.
-    diagnosePlacement = function(title, log)
-        local frames = templateFrames(opts.templateClip)
-        local probeLen = math.min(24, frames or 24)
-        local probe = place(title.track, title.clip.start, probeLen - 1)
-        if probe then
-            call(timeline, "DeleteClips", { probe }, false)
-            log(string.format("\nThe template can be placed, but not at %d frames.", title.clip.dur))
-            for _, line in ipairs(lengthFixLines(frames, title.clip.dur)) do log(line) end
-        else
-            log("\nResolve would not place the template clip at all, even at 1 second.")
-            log("Check that Title template is a Text+ title in the Media Pool (put a Text+ on a")
-            log("timeline, stretch it, drag it into the Media Pool), click Refresh, and try again.")
-        end
-        log("Nothing was created. If a duplicate timeline was made, it is unchanged and can be deleted.")
-    end
-
+    -- endFrame is exclusive on Resolve 21 (0..47 gives 47 frames). If a build
+    -- differs, the first title calibrates it for the rest.
+    local REFUSED = "refused"
     local endAdjust = 0
     local calibrated = false
-    for _, title in ipairs(plan.titles) do
-        local clip = title.clip
-        local label = string.format("V%d %d \"%s\"", title.track, clip.start, shorten(title.marker.text, 30))
-        local item, err
-
+    local function placeExact(track, clip)
         for attempt = 1, 2 do
-            item = place(title.track, clip.start, clip.dur - 1 + endAdjust)
-            if not item then err = "Resolve refused to place the template clip" break end
-
+            local item = place(track, clip.start, clip.dur + endAdjust)
+            if not item then return nil, REFUSED end
             local gotStart = toFrame(call(item, "GetStart"))
             local gotDur = toFrame(call(item, "GetDuration"))
             if gotStart ~= clip.start then
                 call(timeline, "DeleteClips", { item }, false)
-                item, err = nil, string.format("landed at frame %s instead of %d", tostring(gotStart), clip.start)
-                break
+                return nil, string.format("landed at frame %s instead of %d", tostring(gotStart), clip.start)
             end
-            if gotDur == clip.dur then calibrated = true break end
+            if gotDur == clip.dur then calibrated = true return item end
             call(timeline, "DeleteClips", { item }, false)
-            item = nil
             if calibrated or attempt == 2 or not gotDur then
-                err = string.format("came out %s frames long instead of %d (is the template long enough?)", tostring(gotDur), clip.dur)
-                break
+                return nil, string.format("came out %s frames long instead of %d (is the template long enough?)", tostring(gotDur), clip.dur)
             end
             endAdjust = endAdjust + (clip.dur - gotDur)
         end
+    end
 
+    -- Tracks Resolve refuses to place on (e.g. locked in a way the API does not
+    -- report) are skipped; those titles go onto new empty tracks added on top.
+    local refused, spares, lastTrack = {}, {}, {}
+    local function spareTrackFor(clip)
+        local floor = lastTrack[clip] or 0
+        for _, sp in ipairs(spares) do
+            if sp.track > floor then
+                local free = true
+                for _, iv in ipairs(sp.used) do
+                    if clip.start < iv.e and iv.s < clip.start + clip.dur then free = false break end
+                end
+                if free then return sp end
+            end
+        end
+        local before = call(timeline, "GetTrackCount", "video") or 0
+        call(timeline, "AddTrack", "video")
+        local after = call(timeline, "GetTrackCount", "video") or before
+        if after <= before then return nil end
+        local sp = { track = after, used = {} }
+        spares[#spares + 1] = sp
+        return sp
+    end
+
+    local function describeTrack(t)
+        return string.format("locked=%s, enabled=%s, clips=%d",
+            tostring(call(timeline, "GetIsTrackLocked", "video", t)),
+            tostring(call(timeline, "GetIsTrackEnabled", "video", t)),
+            #listOf(call(timeline, "GetItemListInTrack", "video", t)))
+    end
+
+    for _, title in ipairs(plan.titles) do
+        local clip = title.clip
+        local track = title.track
+        local item, err, sp
+        local useSpare = refused[track] or (lastTrack[clip] and track <= lastTrack[clip])
+
+        if not useSpare then
+            item, err = placeExact(track, clip)
+            if not item and err == REFUSED then
+                refused[track] = true
+                log(string.format("  note: Resolve refused track V%d (%s); using a new empty track instead.", track, describeTrack(track)))
+                useSpare = true
+            end
+        end
+        if useSpare then
+            sp = spareTrackFor(clip)
+            if sp then
+                track = sp.track
+                item, err = placeExact(track, clip)
+            else
+                item, err = nil, "could not add a new video track"
+            end
+        end
+
+        local label = string.format("V%d %d \"%s\"", track, clip.start, shorten(title.marker.text, 30))
         if item then
+            if sp then table.insert(sp.used, { s = clip.start, e = clip.start + clip.dur }) end
+            lastTrack[clip] = track
+            -- Placement must never move existing clips. If it did, stop at once.
+            if clip.item and toFrame(call(clip.item, "GetStart")) ~= clip.start then
+                log("  STOP  " .. label .. ": Resolve moved the source clip while placing the title.")
+                log("Nothing more will be done. Undo with Cmd+Z (or delete the duplicate timeline).")
+                result.failed = result.failed + 1
+                return result
+            end
             local styled, styleErr = styleTitle(item, title, opts)
             local frameId = toFrame(call(item, "GetLeftOffset")) or 0
             local tagged = call(item, "AddMarker", frameId, TAG_MARKER_COLOR, "Marker Title",
@@ -648,9 +689,10 @@ local function generate(ctx, plan, opts, log)
             end
         else
             result.failed = result.failed + 1
-            log("  FAIL  " .. label .. ": " .. (err or "unknown error"))
-            if title == plan.titles[1] and err and err:find("refused", 1, true) then
-                diagnosePlacement(title, log)
+            log("  FAIL  " .. label .. ": " .. (err == REFUSED and "Resolve refused to place the template clip, even on a new empty track" or (err or "unknown error")))
+            if err == REFUSED and result.created == 0 then
+                log("\nCheck that Title template is the Text+ you dragged from a timeline into the")
+                log("Media Pool, click Refresh, and try again. Stopping; nothing more was attempted.")
                 result.failed = #plan.titles
                 return result
             end

@@ -67,6 +67,7 @@ function M.newMediaPool(getTimeline, template)
         local tpl = info.mediaPoolItem
         if tpl.frames and (info.endFrame - info.startFrame) > tpl.frames then return { __flags = 1024 } end
         if M.rejectMediaType and info.mediaType ~= nil then return { __flags = 1024 } end
+        if M.refuseTracks and M.refuseTracks[info.trackIndex] then return { __flags = 1024 } end
         local tl = getTimeline()
         local tr = tl.tracks[info.trackIndex]
         if not tr then return {} end

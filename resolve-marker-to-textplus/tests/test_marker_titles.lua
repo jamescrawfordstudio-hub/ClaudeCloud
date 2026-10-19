@@ -86,8 +86,10 @@ local planS = MT.buildPlan(ctxS, opts)
 local logS = {}
 local resS = MT.generate(ctxS, planS, opts, function(s) logS[#logS + 1] = s end)
 local textS = table.concat(logS, "\n")
-check(resS.created == 0 and textS:find("LONGER than your longest clip", 1, true) ~= nil, "too-short template diagnosed")
-check(#tlS.tracks[2] == 0, "probe clip removed after diagnosis")
+check(resS.created == 0 and textS:find("refused", 1, true) ~= nil, "too-short template: nothing created, reported")
+local stray = 0
+for i = 2, #tlS.tracks do stray = stray + #tlS.tracks[i] end
+check(stray == 0, "no stray clips left after refusal")
 
 -- Builds that reject mediaType: falls back to placing without it
 R.rejectMediaType = true
@@ -99,6 +101,28 @@ opts.templateClip = template
 local resM = MT.generate(ctxM, MT.buildPlan(ctxM, opts), opts, function() end)
 check(resM.created == 1 and tlM.tracks[2][1].dur == 48, "mediaType fallback works")
 R.rejectMediaType = false
+
+-- A track Resolve refuses (e.g. locked without the API saying so): titles move
+-- to new empty tracks, still above one another, source clips untouched
+R.refuseTracks = { [2] = true }
+local src = R.newItem({ name = "S", start = 500, dur = 60, left = 0, markers = {
+    [1] = { name = "a", note = "", color = "Blue" }, [2] = { name = "b", note = "", color = "Blue" } } })
+local tlR = R.newTimeline("R", { { src }, {} })
+local ctxR = { timeline = tlR, version = "test", project = {} }
+ctxR.mediaPool = R.newMediaPool(function() return tlR end, template)
+local logR = {}
+local planR = MT.buildPlan(ctxR, opts)
+check(planR.titles[1].track == 2 and planR.titles[2].track == 3, "planned V2, V3")
+local resR = MT.generate(ctxR, planR, opts, function(s) logR[#logR + 1] = s end)
+print(table.concat(logR, "\n"))
+check(resR.created == 2, "both titles created despite refused V2")
+check(#tlR.tracks[2] == 0, "nothing on refused V2")
+local onA = tlR.tracks[3][1] and tlR.tracks[3][1].comp.tool.inputs.StyledText
+local higher
+for i = 4, #tlR.tracks do if tlR.tracks[i][1] then higher = tlR.tracks[i][1].comp.tool.inputs.StyledText end end
+check(onA == nil or higher ~= nil, "titles stay on separate tracks")
+check(src.start == 500 and #tlR.tracks[1] == 1, "source clip untouched")
+R.refuseTracks = nil
 
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

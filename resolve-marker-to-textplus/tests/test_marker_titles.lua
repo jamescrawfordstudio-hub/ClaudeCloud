@@ -86,7 +86,7 @@ local planS = MT.buildPlan(ctxS, opts)
 local logS = {}
 local resS = MT.generate(ctxS, planS, opts, function(s) logS[#logS + 1] = s end)
 local textS = table.concat(logS, "\n")
-check(resS.created == 0 and textS:find("Standard Generator Duration", 1, true) ~= nil, "too-short template diagnosed")
+check(resS.created == 0 and textS:find("LONGER than your longest clip", 1, true) ~= nil, "too-short template diagnosed")
 check(#tlS.tracks[2] == 0, "probe clip removed after diagnosis")
 
 -- Builds that reject mediaType: falls back to placing without it

@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.0.0
+    MarkerTitler  v1.1.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -7,8 +7,8 @@
       ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/
     Run:     Workspace > Scripts > MarkerTitler
 
-    One-time setup per project: drag "Text+" from Effects > Titles into the
-    Media Pool. The script places that clip with MediaPool:AppendToTimeline,
+    One-time setup per project: put a Text+ on a timeline, stretch it longer
+    than your longest clip, and drag it from the timeline into the Media Pool. The script places that clip with MediaPool:AppendToTimeline,
     which is the only API path that takes an exact track, record frame and
     length (InsertFusionTitleIntoTimeline only drops at the playhead).
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.0.0"
+local SCRIPT_VERSION = "1.1.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -525,12 +525,12 @@ local diagnosePlacement
 local function lengthFixLines(frames, needed)
     return {
         string.format("Your Text+ template in the Media Pool is %s frames long, but the longest clip needs %d.",
-            frames and tostring(frames) or "only a few seconds", needed),
+            frames and tostring(frames) or "too short", needed),
         "Resolve won't place a clip longer than its source. To fix it:",
-        "  1. DaVinci Resolve > Preferences > User > Editing > Standard Generator Duration:",
-        "     set it longer than your longest clip (e.g. 00:10:00:00), then Save.",
-        "  2. Delete the Text+ from the Media Pool and drag a fresh Text+ in from",
-        "     Effects > Titles (the new one takes the new length).",
+        "  1. Put a Text+ on any timeline (Effects > Titles > Text+) and drag its end",
+        "     out so it is LONGER than your longest clip (e.g. 10 minutes).",
+        "  2. Drag that long Text+ from the timeline into the Media Pool, and delete",
+        "     the old, short template from the Media Pool.",
         "  3. Click Refresh next to Title template, then Scan again.",
     }
 end
@@ -599,8 +599,8 @@ local function generate(ctx, plan, opts, log)
             for _, line in ipairs(lengthFixLines(frames, title.clip.dur)) do log(line) end
         else
             log("\nResolve would not place the template clip at all, even at 1 second.")
-            log("Check that Title template is a Text+ title in the Media Pool (drag Text+ from")
-            log("Effects > Titles into the Media Pool), click Refresh, and try again.")
+            log("Check that Title template is a Text+ title in the Media Pool (put a Text+ on a")
+            log("timeline, stretch it, drag it into the Media Pool), click Refresh, and try again.")
         end
         log("Nothing was created. If a duplicate timeline was made, it is unchanged and can be deleted.")
     end
@@ -723,7 +723,7 @@ local function runUI(fusionApp)
         local ctx = getContext()
         templates = ctx and findTemplates(ctx.mediaPool) or {}
         if #templates == 0 then
-            itm.Template:AddItem("(none found: drag Text+ into the Media Pool, then Refresh)")
+            itm.Template:AddItem("(none found: drag a long Text+ from a timeline into the Media Pool, then Refresh)")
             return
         end
         local pick = 0
@@ -805,10 +805,10 @@ local function runUI(fusionApp)
         local frames = opts.templateClip and templateFrames(opts.templateClip)
         local longest = longestTitle(plan)
         plan.templateTooShort = frames ~= nil and longest > frames
-        if frames then
-            table.insert(lines, 3, string.format("Title template length: %d frames (longest title needs %d)%s",
-                frames, longest, plan.templateTooShort and "  <-- TOO SHORT" or ""))
-        end
+        local tpl = templates[(itm.Template.CurrentIndex or 0) + 1]
+        table.insert(lines, 3, string.format("Title template: %s  [type: %s]  length: %s frames (longest title needs %d)%s",
+            tpl and tpl.label or "(none)", tpl and (tpl.kind ~= "" and tpl.kind or "?") or "-",
+            frames and tostring(frames) or "unknown", longest, plan.templateTooShort and "  <-- TOO SHORT" or ""))
         if plan.templateTooShort then
             lines[#lines + 1] = "TEMPLATE TOO SHORT"
             for _, line in ipairs(lengthFixLines(frames, longest)) do lines[#lines + 1] = "  " .. line end
@@ -835,7 +835,7 @@ local function runUI(fusionApp)
         end
         if #plan.titles == 0 then appendReport("Nothing to create.") return end
         if not opts.templateClip then
-            appendReport("No title template selected. Drag Text+ from Effects > Titles into the Media Pool, click Refresh, then try again.")
+            appendReport("No title template selected. Put a Text+ on a timeline, stretch it longer than your longest clip, drag it into the Media Pool, click Refresh, then try again.")
             return
         end
 
@@ -883,8 +883,9 @@ local function runUI(fusionApp)
     setReport({
         SCRIPT_NAME .. " " .. SCRIPT_VERSION,
         "",
-        "1. Drag Text+ from Effects > Titles into the Media Pool (once per project),",
-        "   then click Refresh and pick it as the title template.",
+        "1. Once per project: put a Text+ on a timeline, stretch it LONGER than your",
+        "   longest clip, drag it from the timeline into the Media Pool, click Refresh",
+        "   and pick it as the title template.",
         "2. Click Scan / Preview to see what will be created.",
         "3. Untick Dry run, click Generate Titles, then Confirm.",
     })

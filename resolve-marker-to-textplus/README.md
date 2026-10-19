@@ -24,12 +24,12 @@ The tool is written in **Lua**, like other Resolve script collections such as Ed
 
 ## One-time setup per project
 
-**First, make the template long enough.** A Text+ in the Media Pool is only as long as **Preferences > User > Editing > Standard Generator Duration**, which is usually a few seconds. Resolve won't place a title longer than that. Set it longer than your longest clip, for example `00:10:00:00`, and click Save. *Then* drag in the Text+. Scan / Preview shows the template length and warns you if it's too short.
+1. Put a **Text+** on any timeline (**Effects > Titles > Text+**).
+2. Drag its end out so it's **longer than your longest clip**, for example 10 minutes. The Media Pool copy takes this length, and Resolve won't place a title longer than its source.
+3. Drag that Text+ **from the timeline into the Media Pool**. You can rename it **Marker Title Template** and the tool will pick it automatically.
+4. Optionally, style it first. Then tick *Keep the template's font, size and color* in the tool.
 
-
-Drag **Text+** from **Effects > Titles** into the **Media Pool**.
-
-To set the default look, open that Text+ (or any copy of it) in the Inspector or the Fusion page, style it, then tick *Keep the template's font, size and color*. You can also rename it **Marker Title Template** and the tool will pick it automatically.
+Scan / Preview shows the template's type and length, and warns you if it's too short.
 
 > Why: Resolve's scripting API can only place a clip at an exact track, frame and length with `MediaPool.AppendToTimeline`, and that needs a Media Pool item. The other route, `InsertFusionTitleIntoTimeline`, always drops the title at the playhead at the default length.
 

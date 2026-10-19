@@ -1,4 +1,4 @@
-# Marker Titles — clip markers → Text+ titles for DaVinci Resolve
+# MarkerTitler — clip markers → Text+ titles for DaVinci Resolve
 
 For **DaVinci Resolve Studio 20.3 and 21.x** on macOS (Apple Silicon). It also works on Windows and Linux.
 
@@ -6,7 +6,7 @@ Each clip marker becomes a real Text+ title that spans the whole clip. On a clip
 
 | File | Purpose |
 |---|---|
-| `Marker Titles.lua` | **The tool.** Copy this into Resolve. |
+| `MarkerTitler.lua` | **The tool.** Copy this into Resolve. |
 | `Marker Diagnostic (Phase 1).py` | Optional read-only report of every track, clip and marker. Use it if something looks off. Needs Python 3. |
 | `tests/` | Offline tests against a fake Resolve. Run `tests/run_tests.sh`; it needs `pip install lupa`. |
 | `RESEARCH_NOTES.md` | API findings behind the design. |
@@ -19,8 +19,8 @@ The tool is written in **Lua**, like other Resolve script collections such as Ed
 1. In Finder press **⇧⌘G** and paste:
    `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/`
    Create the `Utility` folder if it isn't there.
-2. Copy `Marker Titles.lua` into that folder.
-3. In Resolve it appears under **Workspace > Scripts > Marker Titles** on every page.
+2. Copy `MarkerTitler.lua` into that folder.
+3. In Resolve it appears under **Workspace > Scripts > MarkerTitler** on every page.
 
 ## One-time setup per project
 
@@ -33,7 +33,7 @@ To set the default look, open that Text+ (or any copy of it) in the Inspector or
 ## Use
 
 1. Open your timeline in the Edit page. Add clip markers by selecting a clip and pressing **M**. Type the title text as the marker's name or note.
-2. Run **Workspace > Scripts > Marker Titles**.
+2. Run **Workspace > Scripts > MarkerTitler**.
 3. Choose your options:
    - **Title template:** the Text+ clip in your Media Pool.
    - **Text from:** the marker name, the note, the name falling back to the note, or "Name - Note".

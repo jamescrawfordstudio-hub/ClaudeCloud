@@ -1,11 +1,11 @@
 --[[
-    Marker Titles  v1.0.0
+    MarkerTitler  v1.0.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
     Install: copy this file to
       ~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility/
-    Run:     Workspace > Scripts > Marker Titles
+    Run:     Workspace > Scripts > MarkerTitler
 
     One-time setup per project: drag "Text+" from Effects > Titles into the
     Media Pool. The script places that clip with MediaPool:AppendToTimeline,
@@ -25,7 +25,7 @@
         skip or regenerate it. Nothing else on the timeline is touched.
 ]]
 
-local SCRIPT_NAME = "Marker Titles"
+local SCRIPT_NAME = "MarkerTitler"
 local SCRIPT_VERSION = "1.0.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
@@ -118,9 +118,9 @@ local DEFAULTS = {
 local function settingsPath()
     local dir
     if IS_WINDOWS then
-        dir = (os.getenv("APPDATA") or ".") .. "\\Marker Titles"
+        dir = (os.getenv("APPDATA") or ".") .. "\\MarkerTitler"
     elseif IS_MACOS then
-        dir = os.getenv("HOME") .. "/Library/Application Support/Marker Titles"
+        dir = os.getenv("HOME") .. "/Library/Application Support/MarkerTitler"
     else
         dir = (os.getenv("HOME") or ".") .. "/.config/marker-titles"
     end
@@ -767,7 +767,7 @@ local function runUI()
         itm.Generate.Text = "Generate Titles"
 
         if opts.duplicate then
-            local newName = uniqueTimelineName(ctx.project, plan.timelineName .. " (Marker Titles)")
+            local newName = uniqueTimelineName(ctx.project, plan.timelineName .. " (MarkerTitler)")
             local copy = call(ctx.timeline, "DuplicateTimeline", newName)
             if not copy or not call(ctx.project, "SetCurrentTimeline", copy) then
                 appendReport("ERROR: could not duplicate the timeline. Nothing was changed.")

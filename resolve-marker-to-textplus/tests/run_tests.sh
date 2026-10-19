@@ -3,6 +3,6 @@
 cd "$(dirname "$0")/.." && python3 -c '
 from lupa import luajit21
 lua = luajit21.LuaRuntime()
-lua.execute("arg = {\"Marker Titles.lua\", \"tests\"}")
+lua.execute("arg = {\"MarkerTitler.lua\", \"tests\"}")
 lua.execute(open("tests/test_marker_titles.lua").read().replace("os.exit(", "return ("))
 '

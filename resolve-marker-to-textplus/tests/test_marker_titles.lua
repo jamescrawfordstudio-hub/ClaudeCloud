@@ -1,4 +1,4 @@
--- Offline test: luajit (or lua5.1+) tests/test_marker_titles.lua <path to Marker Titles.lua> <tests dir>
+-- Offline test: luajit (or lua5.1+) tests/test_marker_titles.lua <path to MarkerTitler.lua> <tests dir>
 local scriptPath, testsDir = arg[1], arg[2]
 package.path = testsDir .. "/?.lua;" .. package.path
 local R = require("mock_resolve")

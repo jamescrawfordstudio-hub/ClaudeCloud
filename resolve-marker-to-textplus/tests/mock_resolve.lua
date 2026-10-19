@@ -1,4 +1,4 @@
--- Minimal fake of the Resolve API surface Marker Titles uses.
+-- Minimal fake of the Resolve API surface MarkerTitler uses.
 -- AppendToTimeline treats endFrame as EXCLUSIVE so the calibration path runs.
 local M = {}
 local uidSeq = 0

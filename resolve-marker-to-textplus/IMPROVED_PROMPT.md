@@ -1,5 +1,7 @@
 # Improved prompt (paste into your personal Claude session)
 
+> **Status:** the full tool is now built: see `Marker Titles.lua` and `README.md`. Use this prompt only for follow-up changes.
+
 > **Attach with it:** (1) the Resolve `Developer/Scripting/README.txt` from your install (both 20.3 and 21 if you have them), (2) the Desktop report from `Marker Diagnostic (Phase 1).py` run on a test timeline, (3) the diagnostic script itself.
 
 ---

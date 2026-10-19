@@ -513,6 +513,34 @@ local function uniqueTimelineName(project, base)
     return name
 end
 
+-- Length of a media pool clip in frames, if Resolve reports it.
+local function templateFrames(clip)
+    local frames = tonumber(call(clip, "GetClipProperty", "Frames") or "")
+    if frames and frames > 0 then return math.floor(frames) end
+    return nil
+end
+
+local diagnosePlacement
+
+local function lengthFixLines(frames, needed)
+    return {
+        string.format("Your Text+ template in the Media Pool is %s frames long, but the longest clip needs %d.",
+            frames and tostring(frames) or "only a few seconds", needed),
+        "Resolve won't place a clip longer than its source. To fix it:",
+        "  1. DaVinci Resolve > Preferences > User > Editing > Standard Generator Duration:",
+        "     set it longer than your longest clip (e.g. 00:10:00:00), then Save.",
+        "  2. Delete the Text+ from the Media Pool and drag a fresh Text+ in from",
+        "     Effects > Titles (the new one takes the new length).",
+        "  3. Click Refresh next to Title template, then Scan again.",
+    }
+end
+
+local function longestTitle(plan)
+    local longest = 0
+    for _, t in ipairs(plan.titles) do longest = math.max(longest, t.clip.dur) end
+    return longest
+end
+
 -- endFrame semantics of AppendToTimeline are calibrated on the first title:
 -- if the clip comes out a frame long or short, the rest are corrected.
 local function generate(ctx, plan, opts, log)
@@ -542,6 +570,41 @@ local function generate(ctx, plan, opts, log)
         count = now
     end
 
+    -- AppendToTimeline, trying with and without mediaType (titles have no audio,
+    -- and some builds reject one form or the other).
+    local mediaTypeMode = nil
+    local function place(track, record, endFrame)
+        local modes = mediaTypeMode and { mediaTypeMode } or { "video", "any" }
+        for _, mode in ipairs(modes) do
+            local info = {
+                mediaPoolItem = opts.templateClip, startFrame = 0, endFrame = endFrame,
+                trackIndex = track, recordFrame = record,
+            }
+            if mode == "video" then info.mediaType = 1 end
+            local added = call(mediaPool, "AppendToTimeline", { info })
+            local item = type(added) == "table" and listOf(added)[1] or nil
+            if item then mediaTypeMode = mode return item end
+        end
+        return nil
+    end
+
+    -- Works out why the first placement failed and says how to fix it.
+    diagnosePlacement = function(title, log)
+        local frames = templateFrames(opts.templateClip)
+        local probeLen = math.min(24, frames or 24)
+        local probe = place(title.track, title.clip.start, probeLen - 1)
+        if probe then
+            call(timeline, "DeleteClips", { probe }, false)
+            log(string.format("\nThe template can be placed, but not at %d frames.", title.clip.dur))
+            for _, line in ipairs(lengthFixLines(frames, title.clip.dur)) do log(line) end
+        else
+            log("\nResolve would not place the template clip at all, even at 1 second.")
+            log("Check that Title template is a Text+ title in the Media Pool (drag Text+ from")
+            log("Effects > Titles into the Media Pool), click Refresh, and try again.")
+        end
+        log("Nothing was created. If a duplicate timeline was made, it is unchanged and can be deleted.")
+    end
+
     local endAdjust = 0
     local calibrated = false
     for _, title in ipairs(plan.titles) do
@@ -550,16 +613,8 @@ local function generate(ctx, plan, opts, log)
         local item, err
 
         for attempt = 1, 2 do
-            local added = call(mediaPool, "AppendToTimeline", { {
-                mediaPoolItem = opts.templateClip,
-                startFrame = 0,
-                endFrame = clip.dur - 1 + endAdjust,
-                trackIndex = title.track,
-                recordFrame = clip.start,
-                mediaType = 1,
-            } })
-            item = type(added) == "table" and listOf(added)[1] or nil
-            if not item then err = "AppendToTimeline returned nothing" break end
+            item = place(title.track, clip.start, clip.dur - 1 + endAdjust)
+            if not item then err = "Resolve refused to place the template clip" break end
 
             local gotStart = toFrame(call(item, "GetStart"))
             local gotDur = toFrame(call(item, "GetDuration"))
@@ -594,8 +649,8 @@ local function generate(ctx, plan, opts, log)
         else
             result.failed = result.failed + 1
             log("  FAIL  " .. label .. ": " .. (err or "unknown error"))
-            if title == plan.titles[1] and err and err:find("AppendToTimeline") then
-                log("Stopping: the template clip cannot be placed. Check the template choice.")
+            if title == plan.titles[1] and err and err:find("refused", 1, true) then
+                diagnosePlacement(title, log)
                 result.failed = #plan.titles
                 return result
             end
@@ -746,7 +801,19 @@ local function runUI(fusionApp)
         if not ctx then setReport({ "ERROR: " .. err }) return nil end
         local opts = readOptions()
         local plan = buildPlan(ctx, opts)
-        setReport(describePlan(plan, opts, ctx))
+        local lines = describePlan(plan, opts, ctx)
+        local frames = opts.templateClip and templateFrames(opts.templateClip)
+        local longest = longestTitle(plan)
+        plan.templateTooShort = frames ~= nil and longest > frames
+        if frames then
+            table.insert(lines, 3, string.format("Title template length: %d frames (longest title needs %d)%s",
+                frames, longest, plan.templateTooShort and "  <-- TOO SHORT" or ""))
+        end
+        if plan.templateTooShort then
+            lines[#lines + 1] = "TEMPLATE TOO SHORT"
+            for _, line in ipairs(lengthFixLines(frames, longest)) do lines[#lines + 1] = "  " .. line end
+        end
+        setReport(lines)
         return ctx, plan, opts
     end
 
@@ -769,6 +836,13 @@ local function runUI(fusionApp)
         if #plan.titles == 0 then appendReport("Nothing to create.") return end
         if not opts.templateClip then
             appendReport("No title template selected. Drag Text+ from Effects > Titles into the Media Pool, click Refresh, then try again.")
+            return
+        end
+
+        if plan.templateTooShort then
+            armedSignature = nil
+            itm.Generate.Text = "Generate Titles"
+            appendReport("Nothing was changed: fix the template length first (see above).")
             return
         end
 

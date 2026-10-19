@@ -74,5 +74,31 @@ for i = 2, #tl.tracks do tl.tracks[i] = (i == 2) and { blocker } or {} end
 local plan4 = MT.buildPlan(ctx, opts)
 check(#plan4.titles == 1 and plan4.titles[1].marker.text == "Solo note", "color filter Red -> only Solo")
 
+-- Resolve refuses a template shorter than the clip: diagnose, create nothing
+local short = { frames = 120, GetName = function() return "Text+" end,
+    GetClipProperty = function(self, k) if k == "Frames" then return tostring(self.frames) end return "Fusion Title" end }
+local tlS = R.newTimeline("Short", { { R.newItem({ name = "Long", start = 0, dur = 1870, left = 0,
+    markers = { [5] = { name = "Long one", note = "", color = "Blue" } } }) } })
+local ctxS = { timeline = tlS, version = "test", project = {} }
+ctxS.mediaPool = R.newMediaPool(function() return tlS end, short)
+opts.color, opts.existing, opts.templateClip = "All colors", 0, short
+local planS = MT.buildPlan(ctxS, opts)
+local logS = {}
+local resS = MT.generate(ctxS, planS, opts, function(s) logS[#logS + 1] = s end)
+local textS = table.concat(logS, "\n")
+check(resS.created == 0 and textS:find("Standard Generator Duration", 1, true) ~= nil, "too-short template diagnosed")
+check(#tlS.tracks[2] == 0, "probe clip removed after diagnosis")
+
+-- Builds that reject mediaType: falls back to placing without it
+R.rejectMediaType = true
+local tlM = R.newTimeline("MT", { { R.newItem({ name = "C", start = 0, dur = 48, left = 0,
+    markers = { [1] = { name = "x", note = "", color = "Blue" } } }) } })
+local ctxM = { timeline = tlM, version = "test", project = {} }
+ctxM.mediaPool = R.newMediaPool(function() return tlM end, template)
+opts.templateClip = template
+local resM = MT.generate(ctxM, MT.buildPlan(ctxM, opts), opts, function() end)
+check(resM.created == 1 and tlM.tracks[2][1].dur == 48, "mediaType fallback works")
+R.rejectMediaType = false
+
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

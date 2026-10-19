@@ -6,3 +6,4 @@ lua = luajit21.LuaRuntime()
 lua.execute("arg = {\"MarkerTitler.lua\", \"tests\"}")
 lua.execute(open("tests/test_marker_titles.lua").read().replace("os.exit(", "return ("))
 '
+python3 tests/test_ui_startup.py | tail -1

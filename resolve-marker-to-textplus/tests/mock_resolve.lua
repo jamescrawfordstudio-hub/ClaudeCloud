@@ -12,7 +12,11 @@ local function newItem(t)
     function t:GetDuration() return self.dur end
     function t:GetLeftOffset() return self.left end
     function t:GetUniqueId() return self.uid end
-    function t:GetMarkers() return self.markers end
+    function t:GetMarkers()
+        local out = { __flags = 1024 }
+        for k, v in pairs(self.markers) do out[k] = v end
+        return out
+    end
     function t:GetMediaPoolItem() return self.mpi end
     function t:AddMarker(f, color, name, note, dur, cd)
         if self.markers[f] then return false end
@@ -31,7 +35,7 @@ function M.newTimeline(name, tracks)
     function tl:GetTrackCount(kind) return kind == "video" and #self.tracks or 0 end
     function tl:GetIsTrackLocked(kind, i) return self.tracks[i].locked == true end
     function tl:GetItemListInTrack(kind, i)
-        local out = {}
+        local out = { __flags = 1024 }  -- real Resolve lists carry string keys too
         for k, v in ipairs(self.tracks[i]) do out[k] = v end
         return out
     end
@@ -52,7 +56,7 @@ function M.newTextPlus()
     function tool:SetInput(k, v) self.inputs[k] = v end
     function tool:GetInput(k) return self.inputs[k] end
     local comp = { tool = tool }
-    function comp:GetToolList(sel, id) if id == "TextPlus" then return { [1] = tool } end return {} end
+    function comp:GetToolList(sel, id) if id == "TextPlus" then return { [1] = tool, __flags = 1024 } end return {} end
     return comp
 end
 
@@ -66,10 +70,10 @@ function M.newMediaPool(getTimeline, template)
         local it = newItem({ name = "Text+", start = info.recordFrame, dur = info.endFrame - info.startFrame,
                               left = info.startFrame, mpi = info.mediaPoolItem, comp = M.newTextPlus() })
         table.insert(tr, it)
-        return { it }
+        return { it, __flags = 1024 }
     end
     function mp:GetRootFolder()
-        return { GetClipList = function() return { template } end, GetSubFolderList = function() return {} end }
+        return { GetClipList = function() return { template, __flags = 1024 } end, GetSubFolderList = function() return {} end }
     end
     return mp
 end

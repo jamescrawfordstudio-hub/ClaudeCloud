@@ -78,17 +78,34 @@ local function split(s, sep)
     return out
 end
 
+-- Tables coming back from Resolve can mix numeric keys with string keys
+-- (e.g. "__flags"), so never compare keys of different types.
 local function sortedKeys(t)
     local keys = {}
     for k in pairs(t or {}) do keys[#keys + 1] = k end
-    table.sort(keys, function(a, b) return a < b end)
+    table.sort(keys, function(a, b)
+        local ta, tb = type(a), type(b)
+        if ta ~= tb then return ta < tb end
+        if ta == "number" or ta == "string" then return a < b end
+        return tostring(a) < tostring(b)
+    end)
     return keys
 end
 
+local function numericKeys(t)
+    local keys = {}
+    for k in pairs(t or {}) do
+        if type(k) == "number" then keys[#keys + 1] = k end
+    end
+    table.sort(keys)
+    return keys
+end
+
+-- Values of an API list, in order, ignoring non-numeric bookkeeping keys.
 local function listOf(t)
     local out = {}
     if type(t) ~= "table" then return out end
-    for _, k in ipairs(sortedKeys(t)) do out[#out + 1] = t[k] end
+    for _, k in ipairs(numericKeys(t)) do out[#out + 1] = t[k] end
     return out
 end
 
@@ -270,7 +287,7 @@ local function buildPlan(ctx, opts)
             plan.notes[#plan.notes + 1] = "\"Selected clips only\" needs Resolve 21.0.4 or later; scanning all clips."
         else
             selected = {}
-            for _, item in pairs(sel) do
+            for _, item in ipairs(listOf(sel)) do
                 local uid = itemUid(item)
                 if uid then selected[uid] = true end
             end
@@ -289,7 +306,7 @@ local function buildPlan(ctx, opts)
 
             local tag
             for _, m in pairs(call(item, "GetMarkers") or {}) do
-                tag = tag or parseTag(m.customData)
+                if type(m) == "table" then tag = tag or parseTag(m.customData) end
             end
             if tag then
                 plan.existingCount = plan.existingCount + 1
@@ -309,13 +326,13 @@ local function buildPlan(ctx, opts)
         local uid = itemUid(item)
         local markers = {}
         for f, m in pairs(call(item, "GetMarkers") or {}) do
-            if toFrame(f) then markers[toFrame(f)] = m end
+            if toFrame(f) and type(m) == "table" then markers[toFrame(f)] = m end
         end
         if opts.includeSource then
             local mpi = call(item, "GetMediaPoolItem")
             for f, m in pairs(call(mpi, "GetMarkers") or {}) do
                 f = toFrame(f)
-                if f and markers[f] == nil then markers[f] = m end
+                if f and type(m) == "table" and markers[f] == nil then markers[f] = m end
             end
         end
 
@@ -456,7 +473,7 @@ end
 -- ============================================================================
 
 local function findTextPlus(comp)
-    for _, tool in pairs(call(comp, "GetToolList", false, "TextPlus") or {}) do return tool end
+    for _, tool in ipairs(listOf(call(comp, "GetToolList", false, "TextPlus"))) do return tool end
     return nil
 end
 
@@ -689,7 +706,8 @@ local function runUI(fusionApp)
     local function readOptions()
         local tpl = templates[(itm.Template.CurrentIndex or 0) + 1]
         local opts = {
-            textSource = itm.TextSource.CurrentIndex, color = itm.Color.CurrentText,
+            textSource = itm.TextSource.CurrentIndex,
+            color = MARKER_COLORS[itm.Color.CurrentIndex or 0] or "All colors",
             firstTrack = itm.FirstTrack.CurrentIndex > 0 and (itm.FirstTrack.CurrentIndex + 1) or 0,
             existing = itm.Existing.CurrentIndex,
             font = itm.Font.Text, style = itm.Style.Text,

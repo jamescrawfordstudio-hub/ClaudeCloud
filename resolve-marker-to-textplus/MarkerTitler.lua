@@ -591,8 +591,8 @@ end
 -- Window
 -- ============================================================================
 
-local function runUI()
-    local ui = fu.UIManager
+local function runUI(fusionApp)
+    local ui = fusionApp.UIManager
     local disp = bmd.UIDispatcher(ui)
     local settings = loadSettings()
     local flags = IS_MACOS and { Tool = true } or { Window = true }
@@ -807,8 +807,23 @@ if MARKER_TITLES_TEST then
              markerText = markerText, parseTag = parseTag, makeTag = makeTag, findTemplates = findTemplates }
 end
 
-if not (fu and bmd) then
-    print(SCRIPT_NAME .. ": run this from Workspace > Scripts inside DaVinci Resolve.")
+-- From Workspace > Scripts the `fu` global is not always set (notably on the
+-- Edit page), so get the Fusion object from Resolve itself.
+local function getFusion()
+    local ok, resolve = pcall(function() return Resolve and Resolve() end)
+    if ok and resolve then
+        local okF, f = pcall(function() return resolve:Fusion() end)
+        if okF and f then return f end
+    end
+    return rawget(_G, "fu") or rawget(_G, "fusion") or rawget(_G, "app")
+end
+
+local fusionApp = getFusion()
+if not (fusionApp and bmd) then
+    print(SCRIPT_NAME .. ": could not reach Resolve's Fusion UI. Run this from Workspace > Scripts inside DaVinci Resolve.")
     return
 end
-runUI()
+local ok, err = pcall(runUI, fusionApp)
+if not ok then
+    print(SCRIPT_NAME .. " error: " .. tostring(err))
+end

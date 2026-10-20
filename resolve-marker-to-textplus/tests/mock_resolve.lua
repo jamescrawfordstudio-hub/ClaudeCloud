@@ -65,7 +65,7 @@ function M.newMediaPool(getTimeline, template)
     function mp:AppendToTimeline(list)
         local info = list[1]
         local tpl = info.mediaPoolItem
-        if tpl.frames and (info.endFrame - info.startFrame) > tpl.frames then return { __flags = 1024 } end
+        if tpl and tpl.frames and (info.endFrame - info.startFrame) > tpl.frames then return { __flags = 1024 } end
         if M.rejectMediaType and info.mediaType ~= nil then return { __flags = 1024 } end
         if M.refuseTracks and M.refuseTracks[info.trackIndex] then return { __flags = 1024 } end
         local tl = getTimeline()
@@ -76,8 +76,38 @@ function M.newMediaPool(getTimeline, template)
         table.insert(tr, it)
         return { it, __flags = 1024 }
     end
-    function mp:GetRootFolder()
-        return { GetClipList = function() return { template, __flags = 1024 } end, GetSubFolderList = function() return {} end }
+    -- Media pool folders: root holds the template (if any); bins can be added,
+    -- exported to a "file" (M.files) and imported back.
+    local function folder(name, clips)
+        local f = { name = name, clips = clips or {}, subs = {} }
+        function f:GetName() return self.name end
+        function f:GetClipList() local o = { __flags = 1024 } for i, c in ipairs(self.clips) do o[i] = c end return o end
+        function f:GetSubFolderList() local o = { __flags = 1024 } for i, c in ipairs(self.subs) do o[i] = c end return o end
+        return f
+    end
+    mp.root = folder("Master", template and { template } or {})
+    function mp:GetRootFolder() return self.root end
+    function mp:SetCurrentFolder(f) self.current = f return true end
+    function mp:AddSubFolder(parent, name) local f = folder(name) table.insert(parent.subs, f) return f end
+    function mp:MoveClips(clips, target)
+        for _, c in ipairs(clips) do
+            for k = #self.root.clips, 1, -1 do if self.root.clips[k] == c then table.remove(self.root.clips, k) end end
+            table.insert(target.clips, c)
+        end
+        return true
+    end
+    function mp:ExportFolder(f, path)
+        M.files = M.files or {}
+        M.files[path] = f.clips[1]
+        local fh = io.open(path, "w") fh:write("drb") fh:close()
+        return true
+    end
+    function mp:ImportFolderFromFile(path)
+        local clip = M.files and M.files[path]
+        if not clip then return false end
+        local f = self:AddSubFolder(self.current or self.root, "MarkerTitler")
+        table.insert(f.clips, clip)
+        return true
     end
     return mp
 end

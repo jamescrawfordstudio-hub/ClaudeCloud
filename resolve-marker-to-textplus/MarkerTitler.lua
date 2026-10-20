@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.5.0
+    MarkerTitler  v1.6.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,11 +26,13 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.5.0"
+local SCRIPT_VERSION = "1.6.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
 local TEMPLATE_NAME = "Marker Title Template"
+local TEMPLATE_BIN = "MarkerTitler"
+local TEMPLATE_FILE = "MarkerTitler Template.drb"
 local MAX_TRACKS = 50
 
 local MARKER_COLORS = {
@@ -241,6 +243,71 @@ local function findTemplates(mediaPool)
         return a.label < b.label
     end)
     return found
+end
+
+-- ============================================================================
+-- Shared template file (.drb next to the script)
+-- ============================================================================
+-- Resolve's API cannot put a Text+ from the Effects library into the Media
+-- Pool, but it can export a bin to a .drb file and import one into any
+-- project. The first working template is saved next to the script; after
+-- that every project (and every editor given the folder) gets it automatically.
+
+local function fileExists(path)
+    local fh = path and io.open(path, "rb")
+    if fh then fh:close() return true end
+    return false
+end
+
+local function templateFilePath()
+    local override = rawget(_G, "MARKER_TITLES_TEMPLATE_PATH")
+    if override then return override end
+    local sep = IS_WINDOWS and "\\" or "/"
+    local ok, info = pcall(function() return debug.getinfo(1, "S") end)
+    local src = ok and info and info.source or ""
+    local dir = src:sub(1, 1) == "@" and src:sub(2):match("^(.*)[/\\]") or nil
+    if not dir then dir = settingsPath() end
+    return dir .. sep .. TEMPLATE_FILE
+end
+
+local function findSubFolder(folder, name)
+    for _, sub in ipairs(listOf(call(folder, "GetSubFolderList"))) do
+        if call(sub, "GetName") == name then return sub end
+    end
+    return nil
+end
+
+-- Imports the saved template when the project has none. Returns a message or nil.
+local function importSavedTemplate(mediaPool)
+    if #findTemplates(mediaPool) > 0 then return nil end
+    local path = templateFilePath()
+    if not fileExists(path) then return nil end
+    local root = call(mediaPool, "GetRootFolder")
+    call(mediaPool, "SetCurrentFolder", root)
+    if call(mediaPool, "ImportFolderFromFile", path) and #findTemplates(mediaPool) > 0 then
+        return "Loaded the saved title template into this project (bin \"" .. TEMPLATE_BIN .. "\")."
+    end
+    return "Could not load the saved title template from " .. path
+end
+
+-- Saves a template that has just worked, once. Returns a message or nil.
+local function saveTemplateFile(mediaPool, clip)
+    local path = templateFilePath()
+    if not clip or fileExists(path) then return nil end
+    local root = call(mediaPool, "GetRootFolder")
+    local bin = findSubFolder(root, TEMPLATE_BIN) or call(mediaPool, "AddSubFolder", root, TEMPLATE_BIN)
+    if not bin then return nil end
+    local inBin = false
+    for _, c in ipairs(listOf(call(bin, "GetClipList"))) do
+        if c == clip or (call(c, "GetUniqueId") and call(c, "GetUniqueId") == call(clip, "GetUniqueId")) then inBin = true end
+    end
+    if not inBin then call(mediaPool, "MoveClips", { clip }, bin) end
+    call(clip, "SetClipProperty", "Clip Name", TEMPLATE_NAME)
+    if call(mediaPool, "ExportFolder", bin, path) and fileExists(path) then
+        return "Saved this title template for future projects and other editors:\n  " .. path ..
+            "\nShare the whole MarkerTitler folder (script + .drb) and nobody needs to set up a template."
+    end
+    return nil
 end
 
 local function itemUid(item)
@@ -798,6 +865,7 @@ local function runUI(fusionApp)
     local itm = win:GetItems()
 
     local templates = {}
+    local templateNotice = nil
     local armedSignature = nil
 
     local function setReport(lines) itm.Report.PlainText = table.concat(lines, "\n") end
@@ -806,9 +874,10 @@ local function runUI(fusionApp)
     local function fillTemplates()
         itm.Template:Clear()
         local ctx = getContext()
+        templateNotice = ctx and importSavedTemplate(ctx.mediaPool) or nil
         templates = ctx and findTemplates(ctx.mediaPool) or {}
         if #templates == 0 then
-            itm.Template:AddItem("(none found: drag a long Text+ from a timeline into the Media Pool, then Refresh)")
+            itm.Template:AddItem("(none found: see the steps below)")
             return
         end
         local pick = 0
@@ -974,20 +1043,32 @@ local function runUI(fusionApp)
         appendReport(string.format("\nDONE: %d created, %d failed, %d skipped%s.",
             result.created, result.failed, #plan.skipped,
             result.deleted > 0 and string.format(", %d replaced", result.deleted) or ""))
+        if result.created > 0 then
+            local saved = saveTemplateFile(ctx.mediaPool, opts.templateClip)
+            if saved then appendReport("\n" .. saved) end
+        end
     end)
 
     win.On.Close.Clicked = function() disp:ExitLoop() end
     win.On.MarkerTitlesWin.Close = function() disp:ExitLoop() end
 
-    setReport({
-        SCRIPT_NAME .. " " .. SCRIPT_VERSION,
-        "",
-        "1. Once per project: put a Text+ on a timeline, stretch it LONGER than your",
-        "   longest clip, drag it from the timeline into the Media Pool, click Refresh",
-        "   and pick it as the title template.",
-        "2. Click Scan / Preview to see what will be created.",
-        "3. Untick Dry run, click Generate Titles, then Confirm.",
-    })
+    local intro = { SCRIPT_NAME .. " " .. SCRIPT_VERSION, "" }
+    if templateNotice then intro[#intro + 1] = templateNotice intro[#intro + 1] = "" end
+    if #templates == 0 then
+        for _, line in ipairs({
+            "No title template yet. One-time setup (only ever needed once - after the",
+            "first successful run it is saved and loaded automatically from then on):",
+            "  a. Put a Text+ on any timeline (Effects > Titles > Text+) and stretch it",
+            "     LONGER than your longest clip (e.g. 10 minutes).",
+            "  b. Drag it from the timeline into the Media Pool, then click Refresh.",
+            "",
+        }) do intro[#intro + 1] = line end
+    end
+    for _, line in ipairs({
+        "1. Click Scan / Preview to see what will be created.",
+        "2. Untick Dry run, click Generate Titles, then Confirm.",
+    }) do intro[#intro + 1] = line end
+    setReport(intro)
     win:Show()
     disp:RunLoop()
     win:Hide()
@@ -996,6 +1077,7 @@ end
 -- Allow the planning code to be loaded without a UI (used by the offline tests).
 if MARKER_TITLES_TEST then
     return { buildPlan = buildPlan, describePlan = describePlan, generate = generate,
+             importSavedTemplate = importSavedTemplate, saveTemplateFile = saveTemplateFile,
              markerText = markerText, parseTag = parseTag, makeTag = makeTag, findTemplates = findTemplates }
 end
 

@@ -22,16 +22,25 @@ The tool is written in **Lua**, like other Resolve script collections such as Ed
 2. Copy `MarkerTitler.lua` into that folder.
 3. In Resolve it appears under **Workspace > Scripts > MarkerTitler** on every page.
 
-## One-time setup per project
+## Title template: set up once, then automatic
 
-1. Put a **Text+** on any timeline (**Effects > Titles > Text+**).
-2. Drag its end out so it's **longer than your longest clip**, for example 10 minutes. The Media Pool copy takes this length, and Resolve won't place a title longer than its source.
-3. Drag that Text+ **from the timeline into the Media Pool**. You can rename it **Marker Title Template** and the tool will pick it automatically.
-4. Optionally, style it first. Then tick *Keep the template's font, size and color* in the tool.
+Resolve's scripting can't take Text+ straight from the Effects library into the Media Pool. MarkerTitler gets around this by saving a working template to a file and loading it wherever it's missing.
+
+**First time ever (one person, once):**
+1. Put a **Text+** on any timeline (**Effects > Titles > Text+**) and drag its end out so it's **longer than your longest clip**, for example 10 minutes. Optionally style it.
+2. Drag it **from the timeline into the Media Pool**, then click **Refresh** in MarkerTitler.
+3. Generate titles. After the first successful run, MarkerTitler does three things:
+   - moves the template into a **MarkerTitler** bin
+   - names it **Marker Title Template**
+   - saves the bin as **`MarkerTitler Template.drb` next to the script**
+
+**From then on:** whenever MarkerTitler opens in a project with no template, it loads the saved one into a *MarkerTitler* bin automatically. Nobody has to make a template again.
+
+**For other editors:** share the whole `MarkerTitler` folder, both `MarkerTitler.lua` and `MarkerTitler Template.drb`. They copy it into `…/Fusion/Scripts/Utility/` and there's nothing else to set up.
+
+To change the house look later, delete the `.drb` file, style a new long Text+, and run once to save it again.
 
 Scan / Preview shows the template's type and length, and warns you if it's too short.
-
-> Why: Resolve's scripting API can only place a clip at an exact track, frame and length with `MediaPool.AppendToTimeline`, and that needs a Media Pool item. The other route, `InsertFusionTitleIntoTimeline`, always drops the title at the playhead at the default length.
 
 ## Use
 

@@ -137,5 +137,20 @@ local o2 = { textSource = 4, lineSpacing = 80, color = "All colors", firstTrack 
 MT.generate(ctx2, MT.buildPlan(ctx2, o2), o2, function() end)
 local inp = tl2.tracks[2][1].comp.tool.inputs
 check(inp.StyledText == "Top\nBottom" and inp.LineSpacing == 0.8, "two-line text with 80% line spacing")
+-- Template file: saved once after it worked, loaded into a project without one
+local drb = os.tmpname()
+os.remove(drb)
+MARKER_TITLES_TEMPLATE_PATH = drb
+template.SetClipProperty = function(self, k, v) self.renamed = v return true end
+local saved = MT.saveTemplateFile(ctx.mediaPool, template)
+check(saved ~= nil and io.open(drb, "r") ~= nil, "template saved to .drb after first success")
+check(template.renamed == "Marker Title Template", "template renamed to the standard name")
+check(MT.saveTemplateFile(ctx.mediaPool, template) == nil, "only saved once")
+local emptyPool = R.newMediaPool(function() return tl end, nil)
+local msg = MT.importSavedTemplate(emptyPool)
+check(msg and msg:find("Loaded", 1, true) ~= nil and #MT.findTemplates(emptyPool) == 1, "saved template loaded into empty project")
+check(MT.importSavedTemplate(emptyPool) == nil, "no import when a template already exists")
+os.remove(drb)
+MARKER_TITLES_TEMPLATE_PATH = nil
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

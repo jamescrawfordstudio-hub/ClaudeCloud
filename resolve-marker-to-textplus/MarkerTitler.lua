@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.6.0
+    MarkerTitler  v1.7.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.6.0"
+local SCRIPT_VERSION = "1.7.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -40,6 +40,20 @@ local MARKER_COLORS = {
     "Rose", "Lavender", "Sky", "Mint", "Lemon", "Sand", "Cocoa", "Cream",
 }
 local TEXT_SOURCES = { "Marker name", "Marker note", "Name, or note if name is empty", "Name - Note", "Name (new line) Note" }
+local SOURCE_TRACK_MODES = { "All video tracks", "V1 only", "These tracks:" }
+
+-- "V1, V3-5" / "1 3-5" -> { [1]=true, [3]=true, [4]=true, [5]=true }, or nil if empty/invalid
+local function parseTrackList(text)
+    local set, any = {}, false
+    for token in tostring(text or ""):upper():gsub("V", ""):gmatch("[^,%s]+") do
+        local a, b = token:match("^(%d+)%-(%d+)$")
+        a, b = tonumber(a or token:match("^(%d+)$")), tonumber(b or a or token:match("^(%d+)$"))
+        if not a then return nil end
+        for t = math.min(a, b), math.max(a, b) do set[t] = true any = true end
+    end
+    return any and set or nil
+end
+
 local EXISTING_MODES = { "Skip them", "Regenerate them" }
 
 local unpack = unpack or table.unpack
@@ -139,6 +153,7 @@ end
 
 local DEFAULTS = {
     textSource = 0, color = "All colors", firstTrack = 0, existing = 0, lineSpacing = 100,
+    sourceTracks = 0, trackList = "",
     font = "Open Sans", style = "Bold", size = 6, margin = 6, vpos = 12,
     colorHex = "#FFFFFF", keepStyle = false, includeSource = false,
     selectedOnly = false, duplicate = true, dryRun = true, template = "",
@@ -355,6 +370,17 @@ local function buildPlan(ctx, opts)
     }
     local trackCount = call(timeline, "GetTrackCount", "video") or 0
     plan.trackCount = trackCount
+
+    local sourceSet
+    if opts.sourceTracks == 1 then
+        sourceSet = { [1] = true }
+    elseif opts.sourceTracks == 2 then
+        sourceSet = parseTrackList(opts.trackList)
+        if not sourceSet then
+            plan.notes[#plan.notes + 1] = "No valid tracks in \"" .. tostring(opts.trackList) .. "\" (use e.g. V1, V3-V5); scanning all tracks."
+        end
+    end
+    plan.sourceLabel = not sourceSet and "all video tracks" or (opts.sourceTracks == 1 and "V1 only" or ("V" .. trim(opts.trackList):upper():gsub("^V", "")))
     plan.maxTrack = trackCount
 
     local selected
@@ -390,7 +416,9 @@ local function buildPlan(ctx, opts)
                 local entry = { item = item, track = t, interval = interval, used = false }
                 for _, key in ipairs(keysFor(tag.uid, tag.track, tag.start, tag.frame)) do existing[key] = entry end
             else
-                sources[#sources + 1] = { item = item, track = t, start = s, dur = d }
+                if not sourceSet or sourceSet[t] then
+                    sources[#sources + 1] = { item = item, track = t, start = s, dur = d }
+                end
             end
         end
     end
@@ -526,6 +554,7 @@ local function describePlan(plan, opts, ctx)
     if plan.maxTrack > plan.trackCount then
         add(string.format("New video tracks needed: %d (V%d-V%d)", plan.maxTrack - plan.trackCount, plan.trackCount + 1, plan.maxTrack))
     end
+    add("Reading markers from: " .. (plan.sourceLabel or "all video tracks"))
     for _, n in ipairs(plan.notes) do add("Note: " .. n) end
     add("")
     if #plan.titles > 0 then
@@ -834,6 +863,8 @@ local function runUI(fusionApp)
             ui:Label{ ID = "LineSpacingLabel", Text = "Line spacing %", Weight = 0 },
             ui:SpinBox{ ID = "LineSpacing", Minimum = 50, Maximum = 300, SingleStep = 5, Weight = 0 }),
         row("Marker color", ui:ComboBox{ ID = "Color" }),
+        row("Read markers on", ui:ComboBox{ ID = "SourceTracks" },
+            ui:LineEdit{ ID = "TrackList", PlaceholderText = "e.g. V1, V3-V5" }),
         row("First title track", ui:ComboBox{ ID = "FirstTrack" }),
         row("Earlier titles", ui:ComboBox{ ID = "Existing" }),
         row("Font / style", ui:LineEdit{ ID = "Font" }, ui:LineEdit{ ID = "Style" }),
@@ -897,6 +928,12 @@ local function runUI(fusionApp)
 
     itm.TextSource.CurrentIndex = settings.textSource
     itm.LineSpacing.Value = settings.lineSpacing
+    itm.SourceTracks:AddItems(SOURCE_TRACK_MODES)
+    itm.SourceTracks.CurrentIndex = settings.sourceTracks
+    itm.TrackList.Text = settings.trackList
+    local function updateTrackList() itm.TrackList.Enabled = itm.SourceTracks.CurrentIndex == 2 end
+    updateTrackList()
+    win.On.SourceTracks.CurrentIndexChanged = function() updateTrackList() end
     local function updateLineSpacing()
         local twoLines = itm.TextSource.CurrentIndex == 4
         itm.LineSpacing.Enabled = twoLines
@@ -924,6 +961,7 @@ local function runUI(fusionApp)
         local tpl = templates[(itm.Template.CurrentIndex or 0) + 1]
         local opts = {
             textSource = itm.TextSource.CurrentIndex, lineSpacing = itm.LineSpacing.Value,
+            sourceTracks = itm.SourceTracks.CurrentIndex, trackList = itm.TrackList.Text,
             color = MARKER_COLORS[itm.Color.CurrentIndex or 0] or "All colors",
             firstTrack = itm.FirstTrack.CurrentIndex > 0 and (itm.FirstTrack.CurrentIndex + 1) or 0,
             existing = itm.Existing.CurrentIndex,
@@ -1077,7 +1115,7 @@ end
 -- Allow the planning code to be loaded without a UI (used by the offline tests).
 if MARKER_TITLES_TEST then
     return { buildPlan = buildPlan, describePlan = describePlan, generate = generate,
-             importSavedTemplate = importSavedTemplate, saveTemplateFile = saveTemplateFile,
+             importSavedTemplate = importSavedTemplate, parseTrackList = parseTrackList, saveTemplateFile = saveTemplateFile,
              markerText = markerText, parseTag = parseTag, makeTag = makeTag, findTemplates = findTemplates }
 end
 

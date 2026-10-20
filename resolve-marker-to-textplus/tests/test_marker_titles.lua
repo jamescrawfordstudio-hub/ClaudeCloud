@@ -152,5 +152,26 @@ check(msg and msg:find("Loaded", 1, true) ~= nil and #MT.findTemplates(emptyPool
 check(MT.importSavedTemplate(emptyPool) == nil, "no import when a template already exists")
 os.remove(drb)
 MARKER_TITLES_TEMPLATE_PATH = nil
+-- Source track choice
+local p1 = MT.parseTrackList("V1, v3-5")
+check(p1 and p1[1] and p1[3] and p1[4] and p1[5] and not p1[2], "parse 'V1, v3-5'")
+check(MT.parseTrackList("abc") == nil and MT.parseTrackList("") == nil, "invalid track lists rejected")
+local a1 = R.newItem({ name = "OnV1", start = 0, dur = 24, left = 0, markers = { [1] = { name = "v1", note = "", color = "Blue" } } })
+local a2 = R.newItem({ name = "OnV2", start = 100, dur = 24, left = 0, markers = { [1] = { name = "v2", note = "", color = "Blue" } } })
+local tlT = R.newTimeline("Tracks", { { a1 }, { a2 } })
+local ctxT = { timeline = tlT, version = "test", project = {} }
+ctxT.mediaPool = R.newMediaPool(function() return tlT end, template)
+local base = { textSource = 0, color = "All colors", firstTrack = 0, existing = 0 }
+base.sourceTracks = 0
+check(#MT.buildPlan(ctxT, base).titles == 2, "all tracks: 2 titles")
+base.sourceTracks = 1
+local pv1 = MT.buildPlan(ctxT, base)
+check(#pv1.titles == 1 and pv1.titles[1].marker.text == "v1", "V1 only")
+base.sourceTracks, base.trackList = 2, "V2"
+local pv2 = MT.buildPlan(ctxT, base)
+check(#pv2.titles == 1 and pv2.titles[1].marker.text == "v2", "custom list V2")
+base.trackList = "nonsense"
+local pbad = MT.buildPlan(ctxT, base)
+check(#pbad.titles == 2 and #pbad.notes == 1, "bad list falls back to all tracks with a note")
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

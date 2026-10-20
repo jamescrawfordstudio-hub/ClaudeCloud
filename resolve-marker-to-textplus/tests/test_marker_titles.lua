@@ -153,25 +153,33 @@ check(MT.importSavedTemplate(emptyPool) == nil, "no import when a template alrea
 os.remove(drb)
 MARKER_TITLES_TEMPLATE_PATH = nil
 -- Source track choice
-local p1 = MT.parseTrackList("V1, v3-5")
-check(p1 and p1[1] and p1[3] and p1[4] and p1[5] and not p1[2], "parse 'V1, v3-5'")
-check(MT.parseTrackList("abc") == nil and MT.parseTrackList("") == nil, "invalid track lists rejected")
+local p1 = MT.parseTrackList("V1, v3-5, a1-A2, 7")
+check(p1 and p1.V1 and p1.V3 and p1.V4 and p1.V5 and p1.A1 and p1.A2 and p1.V7 and not p1.V2, "parse 'V1, v3-5, a1-A2, 7'")
+check(MT.parseTrackList("abc") == nil and MT.parseTrackList("") == nil and MT.parseTrackList("V1-A2") == nil, "invalid track lists rejected")
 local a1 = R.newItem({ name = "OnV1", start = 0, dur = 24, left = 0, markers = { [1] = { name = "v1", note = "", color = "Blue" } } })
 local a2 = R.newItem({ name = "OnV2", start = 100, dur = 24, left = 0, markers = { [1] = { name = "v2", note = "", color = "Blue" } } })
-local tlT = R.newTimeline("Tracks", { { a1 }, { a2 } })
+-- linked audio of a1 carries the same marker; a separate music clip has its own
+local a1audio = R.newItem({ name = "OnV1", start = 0, dur = 24, left = 0, markers = { [1] = { name = "v1", note = "", color = "Blue" } } })
+local music = R.newItem({ name = "Music", start = 200, dur = 48, left = 0, markers = { [3] = { name = "beat", note = "", color = "Blue" } } })
+local tlT = R.newTimeline("Tracks", { { a1 }, { a2 } }, { { a1audio }, { music } })
 local ctxT = { timeline = tlT, version = "test", project = {} }
 ctxT.mediaPool = R.newMediaPool(function() return tlT end, template)
 local base = { textSource = 0, color = "All colors", firstTrack = 0, existing = 0 }
+local function texts(plan) local o = {} for _, t in ipairs(plan.titles) do o[#o + 1] = t.marker.text end table.sort(o) return table.concat(o, ",") end
 base.sourceTracks = 0
-check(#MT.buildPlan(ctxT, base).titles == 2, "all tracks: 2 titles")
+local pall = MT.buildPlan(ctxT, base)
+check(texts(pall) == "beat,v1,v2" and pall.linkedDupes == 1, "all tracks: video + audio, linked duplicate merged")
+local beat
+for _, t in ipairs(pall.titles) do if t.marker.text == "beat" then beat = t end end
+check(beat and beat.track == 1 and beat.clip.label == "A2", "audio clip title on V1 where it is free")
 base.sourceTracks = 1
-local pv1 = MT.buildPlan(ctxT, base)
-check(#pv1.titles == 1 and pv1.titles[1].marker.text == "v1", "V1 only")
-base.sourceTracks, base.trackList = 2, "V2"
-local pv2 = MT.buildPlan(ctxT, base)
-check(#pv2.titles == 1 and pv2.titles[1].marker.text == "v2", "custom list V2")
+check(texts(MT.buildPlan(ctxT, base)) == "v1,v2", "all video tracks")
+base.sourceTracks = 2
+check(texts(MT.buildPlan(ctxT, base)) == "v1", "V1 only")
+base.sourceTracks, base.trackList = 3, "V2, A2"
+check(texts(MT.buildPlan(ctxT, base)) == "beat,v2", "custom list V2, A2")
 base.trackList = "nonsense"
 local pbad = MT.buildPlan(ctxT, base)
-check(#pbad.titles == 2 and #pbad.notes == 1, "bad list falls back to all tracks with a note")
+check(texts(pbad) == "beat,v1,v2" and #pbad.notes == 1, "bad list falls back to all tracks with a note")
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

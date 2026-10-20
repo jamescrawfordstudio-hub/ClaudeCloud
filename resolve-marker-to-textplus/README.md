@@ -49,7 +49,7 @@ Scan / Preview shows the template's type and length, and warns you if it's too s
 3. Choose your options:
    - **Title template:** the Text+ clip in your Media Pool.
    - **Text from:** the marker name, the note, the name falling back to the note, "Name - Note", or "Name (new line) Note". With the new-line option, **Line spacing %** (next to it) sets the gap between the two lines. 100 is the Text+ default, and lower values tighten it. It applies even when you keep the template's style.
-   - **Read markers on:** *All video tracks*, *V1 only*, or *These tracks:* followed by a list such as `V1, V3-V5`. Titles still avoid clips on every track.
+   - **Read markers on:** *All tracks (video + audio)* (the default), *All video tracks*, *V1 only*, or *These tracks:* with a list such as `V1, V3-V5, A1-A2`. A bare number means a video track. Titles for audio clips go on video tracks from V1 up, wherever there is empty space. If a video clip and its linked audio both carry the same marker, you get one title, not two.
    - **Marker color:** only use markers of one color.
    - **First title track:** *Auto* puts titles just above each clip. You can also choose a minimum track number.
    - **Earlier titles:** on a re-run, either *Skip* markers that already have a title or *Regenerate* those titles.

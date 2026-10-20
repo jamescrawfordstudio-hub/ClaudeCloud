@@ -29,14 +29,19 @@ local function newItem(t)
 end
 M.newItem = newItem
 
-function M.newTimeline(name, tracks)
-    local tl = { name = name, tracks = tracks }
+function M.newTimeline(name, tracks, audio)
+    local tl = { name = name, tracks = tracks, audio = audio or {} }
     function tl:GetName() return self.name end
-    function tl:GetTrackCount(kind) return kind == "video" and #self.tracks or 0 end
+    function tl:GetTrackCount(kind)
+        if kind == "video" then return #self.tracks end
+        if kind == "audio" then return #self.audio end
+        return 0
+    end
     function tl:GetIsTrackLocked(kind, i) return self.tracks[i].locked == true end
     function tl:GetItemListInTrack(kind, i)
         local out = { __flags = 1024 }  -- real Resolve lists carry string keys too
-        for k, v in ipairs(self.tracks[i]) do out[k] = v end
+        local src = kind == "audio" and self.audio[i] or self.tracks[i]
+        for k, v in ipairs(src or {}) do out[k] = v end
         return out
     end
     function tl:AddTrack(kind) table.insert(self.tracks, {}) return true end

@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.7.0
+    MarkerTitler  v1.8.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.7.0"
+local SCRIPT_VERSION = "1.8.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -40,16 +40,22 @@ local MARKER_COLORS = {
     "Rose", "Lavender", "Sky", "Mint", "Lemon", "Sand", "Cocoa", "Cream",
 }
 local TEXT_SOURCES = { "Marker name", "Marker note", "Name, or note if name is empty", "Name - Note", "Name (new line) Note" }
-local SOURCE_TRACK_MODES = { "All video tracks", "V1 only", "These tracks:" }
+local SOURCE_TRACK_MODES = { "All tracks (video + audio)", "All video tracks", "V1 only", "These tracks:" }
 
--- "V1, V3-5" / "1 3-5" -> { [1]=true, [3]=true, [4]=true, [5]=true }, or nil if empty/invalid
+-- "V1, V3-5, A1-A2" / "1 3-5" -> { V1=true, V3=true, ..., A1=true, A2=true },
+-- or nil if empty/invalid. A bare number means a video track.
 local function parseTrackList(text)
     local set, any = {}, false
-    for token in tostring(text or ""):upper():gsub("V", ""):gmatch("[^,%s]+") do
-        local a, b = token:match("^(%d+)%-(%d+)$")
-        a, b = tonumber(a or token:match("^(%d+)$")), tonumber(b or a or token:match("^(%d+)$"))
-        if not a then return nil end
-        for t = math.min(a, b), math.max(a, b) do set[t] = true any = true end
+    for token in tostring(text or ""):upper():gmatch("[^,%s]+") do
+        local kind, a, kind2, b = token:match("^([VA]?)(%d+)%-([VA]?)(%d+)$")
+        if not kind then
+            kind, a = token:match("^([VA]?)(%d+)$")
+            b, kind2 = a, kind
+        end
+        if not a or (kind2 ~= "" and kind ~= "" and kind2 ~= kind) then return nil end
+        kind = kind ~= "" and kind or (kind2 ~= "" and kind2 or "V")
+        a, b = tonumber(a), tonumber(b)
+        for t = math.min(a, b), math.max(a, b) do set[kind .. t] = true any = true end
     end
     return any and set or nil
 end
@@ -371,16 +377,24 @@ local function buildPlan(ctx, opts)
     local trackCount = call(timeline, "GetTrackCount", "video") or 0
     plan.trackCount = trackCount
 
-    local sourceSet
+    -- Which tracks to read markers from: nil = everything (video + audio)
+    local sourceSet, readAudio = nil, true
     if opts.sourceTracks == 1 then
-        sourceSet = { [1] = true }
+        readAudio = false
+        plan.sourceLabel = "all video tracks"
     elseif opts.sourceTracks == 2 then
+        sourceSet = { V1 = true }
+        plan.sourceLabel = "V1 only"
+    elseif opts.sourceTracks == 3 then
         sourceSet = parseTrackList(opts.trackList)
-        if not sourceSet then
-            plan.notes[#plan.notes + 1] = "No valid tracks in \"" .. tostring(opts.trackList) .. "\" (use e.g. V1, V3-V5); scanning all tracks."
+        if sourceSet then
+            plan.sourceLabel = trim(opts.trackList):upper()
+        else
+            plan.notes[#plan.notes + 1] = "No valid tracks in \"" .. tostring(opts.trackList) .. "\" (use e.g. V1, V3-V5, A1-A2); reading all tracks."
         end
     end
-    plan.sourceLabel = not sourceSet and "all video tracks" or (opts.sourceTracks == 1 and "V1 only" or ("V" .. trim(opts.trackList):upper():gsub("^V", "")))
+    plan.sourceLabel = plan.sourceLabel or "all tracks (video + audio)"
+    local function wanted(label) return not sourceSet or sourceSet[label] end
     plan.maxTrack = trackCount
 
     local selected
@@ -416,12 +430,32 @@ local function buildPlan(ctx, opts)
                 local entry = { item = item, track = t, interval = interval, used = false }
                 for _, key in ipairs(keysFor(tag.uid, tag.track, tag.start, tag.frame)) do existing[key] = entry end
             else
-                if not sourceSet or sourceSet[t] then
-                    sources[#sources + 1] = { item = item, track = t, start = s, dur = d }
+                if wanted("V" .. t) then
+                    sources[#sources + 1] = { item = item, kind = "video", track = t, label = "V" .. t,
+                        tagTrack = t, floor = t + 1, start = s, dur = d }
                 end
             end
         end
     end
+
+    -- Audio clips can carry clip markers too; their titles go on video tracks
+    -- from V1 up (still only into empty space).
+    if readAudio then
+        for t = 1, call(timeline, "GetTrackCount", "audio") or 0 do
+            if wanted("A" .. t) then
+                for _, item in ipairs(listOf(call(timeline, "GetItemListInTrack", "audio", t))) do
+                    sources[#sources + 1] = { item = item, kind = "audio", track = t, label = "A" .. t,
+                        tagTrack = "A" .. t, floor = 1,
+                        start = toFrame(call(item, "GetStart")), dur = toFrame(call(item, "GetDuration")) }
+                end
+            end
+        end
+    end
+
+    -- A marker on a linked clip shows up on both the video and the audio part;
+    -- make one title for it, not two. Video parts are scanned first.
+    local seenMarker = {}
+    plan.linkedDupes = 0
 
     -- Collect eligible markers per source clip
     for _, src in ipairs(sources) do
@@ -445,13 +479,19 @@ local function buildPlan(ctx, opts)
         local inSelection = not selected or (uid and selected[uid])
         if #frames > 0 and inSelection then
             if not (src.start and src.dur and left) then
-                plan.skipped[#plan.skipped + 1] = string.format("V%d %s: %d marker(s) - clip has no source range (generator/compound?)", src.track, name, #frames)
+                plan.skipped[#plan.skipped + 1] = string.format("%s %s: %d marker(s) - clip has no source range (generator/compound?)", src.label, name, #frames)
             else
-                local clip = { name = name, track = src.track, start = src.start, dur = src.dur, uid = uid, item = item, markers = {} }
+                local clip = { name = name, track = src.track, label = src.label, kind = src.kind, floor = src.floor,
+                    tagTrack = src.tagTrack, start = src.start, dur = src.dur, uid = uid, item = item, markers = {} }
                 for _, f in ipairs(frames) do
                     local m = markers[f]
+                    local dupKey = table.concat({ src.start, src.dur, f - left, tostring(m.name), tostring(m.note), tostring(m.color) }, "|")
+                    local where = string.format("%s %s @%d", src.label, name, src.start + f - left)
+                    if seenMarker[dupKey] and src.kind == "audio" then
+                        plan.linkedDupes = plan.linkedDupes + 1
+                    else
+                    seenMarker[dupKey] = true
                     plan.markerCount = plan.markerCount + 1
-                    local where = string.format("V%d %s @%d", src.track, name, src.start + f - left)
                     if f < left or f >= left + src.dur then
                         plan.skipped[#plan.skipped + 1] = where .. ": marker is in the trimmed-off part of the clip"
                     elseif opts.color ~= "All colors" and m.color ~= opts.color then
@@ -463,6 +503,7 @@ local function buildPlan(ctx, opts)
                         else
                             clip.markers[#clip.markers + 1] = { frame = f, text = text, color = m.color }
                         end
+                    end
                     end
                 end
                 if #clip.markers > 0 then plan.clips[#plan.clips + 1] = clip end
@@ -476,7 +517,7 @@ local function buildPlan(ctx, opts)
         for i, mk in ipairs(clip.markers) do
             mk.index = i
             local prior
-            for _, key in ipairs(keysFor(clip.uid, clip.track, clip.start, mk.frame)) do
+            for _, key in ipairs(keysFor(clip.uid, clip.tagTrack, clip.start, mk.frame)) do
                 prior = prior or existing[key]
             end
             if prior and not prior.used then
@@ -488,10 +529,10 @@ local function buildPlan(ctx, opts)
                     end
                     kept[#kept + 1] = mk
                 else
-                    plan.skipped[#plan.skipped + 1] = string.format("V%d %s: \"%s\" already has a title", clip.track, clip.name, shorten(mk.text, 30))
+                    plan.skipped[#plan.skipped + 1] = string.format("%s %s: \"%s\" already has a title", clip.label, clip.name, shorten(mk.text, 30))
                 end
             elseif prior then
-                plan.skipped[#plan.skipped + 1] = string.format("V%d %s: \"%s\" already has a title", clip.track, clip.name, shorten(mk.text, 30))
+                plan.skipped[#plan.skipped + 1] = string.format("%s %s: \"%s\" already has a title", clip.label, clip.name, shorten(mk.text, 30))
             else
                 kept[#kept + 1] = mk
             end
@@ -514,16 +555,17 @@ local function buildPlan(ctx, opts)
     end
 
     table.sort(plan.clips, function(a, b)
+        if a.kind ~= b.kind then return a.kind == "video" end
         if a.track ~= b.track then return a.track < b.track end
         return a.start < b.start
     end)
     for _, clip in ipairs(plan.clips) do
-        local floor = math.max(clip.track + 1, opts.firstTrack > 0 and opts.firstTrack or 1)
+        local floor = math.max(clip.floor, opts.firstTrack > 0 and opts.firstTrack or 1)
         for i, mk in ipairs(clip.markers) do
             local t = floor
             while t <= MAX_TRACKS and not isFree(t, clip.start, clip.start + clip.dur) do t = t + 1 end
             if t > MAX_TRACKS then
-                plan.skipped[#plan.skipped + 1] = string.format("V%d %s: no free track below V%d", clip.track, clip.name, MAX_TRACKS)
+                plan.skipped[#plan.skipped + 1] = string.format("%s %s: no free track below V%d", clip.label, clip.name, MAX_TRACKS)
                 break
             end
             occupancy[t] = occupancy[t] or {}
@@ -533,7 +575,7 @@ local function buildPlan(ctx, opts)
             plan.titles[#plan.titles + 1] = {
                 clip = clip, marker = mk, track = t,
                 side = (i % 2 == 1) and "left" or "right",
-                tag = makeTag(clip.uid, clip.track, clip.start, mk.frame),
+                tag = makeTag(clip.uid, clip.tagTrack, clip.start, mk.frame),
             }
         end
     end
@@ -554,15 +596,18 @@ local function describePlan(plan, opts, ctx)
     if plan.maxTrack > plan.trackCount then
         add(string.format("New video tracks needed: %d (V%d-V%d)", plan.maxTrack - plan.trackCount, plan.trackCount + 1, plan.maxTrack))
     end
-    add("Reading markers from: " .. (plan.sourceLabel or "all video tracks"))
+    add("Reading markers from: " .. (plan.sourceLabel or "all tracks (video + audio)"))
+    if (plan.linkedDupes or 0) > 0 then
+        add(string.format("Linked audio: %d marker(s) also on the video part - one title each, not two.", plan.linkedDupes))
+    end
     for _, n in ipairs(plan.notes) do add("Note: " .. n) end
     add("")
     if #plan.titles > 0 then
         add("PLANNED TITLES")
         for _, t in ipairs(plan.titles) do
-            add(string.format("  V%-2d  %6d-%-6d (%4df)  %-5s  %s  <- V%d %s",
+            add(string.format("  V%-2d  %6d-%-6d (%4df)  %-5s  %s  <- %s %s",
                 t.track, t.clip.start, t.clip.start + t.clip.dur - 1, t.clip.dur, t.side,
-                "\"" .. shorten(t.marker.text, 40) .. "\"", t.clip.track, shorten(t.clip.name, 24)))
+                "\"" .. shorten(t.marker.text, 40) .. "\"", t.clip.label, shorten(t.clip.name, 24)))
         end
         add("")
     end
@@ -864,7 +909,7 @@ local function runUI(fusionApp)
             ui:SpinBox{ ID = "LineSpacing", Minimum = 50, Maximum = 300, SingleStep = 5, Weight = 0 }),
         row("Marker color", ui:ComboBox{ ID = "Color" }),
         row("Read markers on", ui:ComboBox{ ID = "SourceTracks" },
-            ui:LineEdit{ ID = "TrackList", PlaceholderText = "e.g. V1, V3-V5" }),
+            ui:LineEdit{ ID = "TrackList", PlaceholderText = "e.g. V1, V3-V5, A1-A2" }),
         row("First title track", ui:ComboBox{ ID = "FirstTrack" }),
         row("Earlier titles", ui:ComboBox{ ID = "Existing" }),
         row("Font / style", ui:LineEdit{ ID = "Font" }, ui:LineEdit{ ID = "Style" }),
@@ -931,7 +976,7 @@ local function runUI(fusionApp)
     itm.SourceTracks:AddItems(SOURCE_TRACK_MODES)
     itm.SourceTracks.CurrentIndex = settings.sourceTracks
     itm.TrackList.Text = settings.trackList
-    local function updateTrackList() itm.TrackList.Enabled = itm.SourceTracks.CurrentIndex == 2 end
+    local function updateTrackList() itm.TrackList.Enabled = itm.SourceTracks.CurrentIndex == 3 end
     updateTrackList()
     win.On.SourceTracks.CurrentIndexChanged = function() updateTrackList() end
     local function updateLineSpacing()

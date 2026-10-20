@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.4.0
+    MarkerTitler  v1.5.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.4.0"
+local SCRIPT_VERSION = "1.5.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -136,7 +136,7 @@ end
 -- ============================================================================
 
 local DEFAULTS = {
-    textSource = 0, color = "All colors", firstTrack = 0, existing = 0,
+    textSource = 0, color = "All colors", firstTrack = 0, existing = 0, lineSpacing = 100,
     font = "Open Sans", style = "Bold", size = 6, margin = 6, vpos = 12,
     colorHex = "#FFFFFF", keepStyle = false, includeSource = false,
     selectedOnly = false, duplicate = true, dryRun = true, template = "",
@@ -494,6 +494,9 @@ local function styleTitle(item, title, opts)
     local function set(name, value) return pcall(function() tool:SetInput(name, value) end) end
 
     set("StyledText", title.marker.text)
+    -- Line spacing only matters for the two-line preset, so it is applied there
+    -- even when the template's own style is kept.
+    if opts.textSource == 4 then set("LineSpacing", (opts.lineSpacing or 100) / 100) end
     local isLeft = title.side == "left"
     local margin = (opts.margin or 6) / 100
     set("HorizontalJustificationNew", isLeft and 0 or 2)
@@ -760,7 +763,9 @@ local function runUI(fusionApp)
         Geometry = { 200, 120, 720, 720 },
     }, ui:VGroup{
         row("Title template", ui:ComboBox{ ID = "Template" }, ui:Button{ ID = "RefreshTemplates", Text = "Refresh", Weight = 0 }),
-        row("Text from", ui:ComboBox{ ID = "TextSource" }),
+        row("Text from", ui:ComboBox{ ID = "TextSource" },
+            ui:Label{ ID = "LineSpacingLabel", Text = "Line spacing %", Weight = 0 },
+            ui:SpinBox{ ID = "LineSpacing", Minimum = 50, Maximum = 300, SingleStep = 5, Weight = 0 }),
         row("Marker color", ui:ComboBox{ ID = "Color" }),
         row("First title track", ui:ComboBox{ ID = "FirstTrack" }),
         row("Earlier titles", ui:ComboBox{ ID = "Existing" }),
@@ -822,6 +827,14 @@ local function runUI(fusionApp)
     itm.Existing:AddItems(EXISTING_MODES)
 
     itm.TextSource.CurrentIndex = settings.textSource
+    itm.LineSpacing.Value = settings.lineSpacing
+    local function updateLineSpacing()
+        local twoLines = itm.TextSource.CurrentIndex == 4
+        itm.LineSpacing.Enabled = twoLines
+        itm.LineSpacingLabel.Enabled = twoLines
+    end
+    updateLineSpacing()
+    win.On.TextSource.CurrentIndexChanged = function() updateLineSpacing() end
     itm.Color.CurrentIndex = 0
     for i, c in ipairs(MARKER_COLORS) do
         if c == settings.color then itm.Color.CurrentIndex = i end
@@ -841,7 +854,7 @@ local function runUI(fusionApp)
     local function readOptions()
         local tpl = templates[(itm.Template.CurrentIndex or 0) + 1]
         local opts = {
-            textSource = itm.TextSource.CurrentIndex,
+            textSource = itm.TextSource.CurrentIndex, lineSpacing = itm.LineSpacing.Value,
             color = MARKER_COLORS[itm.Color.CurrentIndex or 0] or "All colors",
             firstTrack = itm.FirstTrack.CurrentIndex > 0 and (itm.FirstTrack.CurrentIndex + 1) or 0,
             existing = itm.Existing.CurrentIndex,

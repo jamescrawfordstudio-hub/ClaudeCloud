@@ -127,5 +127,15 @@ R.refuseTracks = nil
 local mk = { name = "Title", note = "Sub" }
 check(MT.markerText(mk, 4) == "Title\nSub", "name (new line) note")
 check(MT.markerText({ name = "Only", note = "" }, 4) == "Only", "new line option with empty note")
+-- Two-line preset applies line spacing, even with the template style kept
+local tl2 = R.newTimeline("L", { { R.newItem({ name = "C", start = 0, dur = 24, left = 0,
+    markers = { [1] = { name = "Top", note = "Bottom", color = "Blue" } } }) } })
+local ctx2 = { timeline = tl2, version = "test", project = {} }
+ctx2.mediaPool = R.newMediaPool(function() return tl2 end, template)
+local o2 = { textSource = 4, lineSpacing = 80, color = "All colors", firstTrack = 0, existing = 0,
+    keepStyle = true, margin = 6, vpos = 12, templateClip = template }
+MT.generate(ctx2, MT.buildPlan(ctx2, o2), o2, function() end)
+local inp = tl2.tracks[2][1].comp.tool.inputs
+check(inp.StyledText == "Top\nBottom" and inp.LineSpacing == 0.8, "two-line text with 80% line spacing")
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

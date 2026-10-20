@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.2.0
+    MarkerTitler  v1.3.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.2.0"
+local SCRIPT_VERSION = "1.3.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -119,6 +119,16 @@ local function shorten(s, n)
     s = (s or ""):gsub("[\r\n]+", " ")
     if #s > n then return s:sub(1, n - 3) .. "..." end
     return s
+end
+
+local function describe(v, depth)
+    depth = depth or 0
+    if type(v) ~= "table" then return tostring(v) end
+    if depth > 1 then return "{...}" end
+    local parts = {}
+    for k, x in pairs(v) do parts[#parts + 1] = tostring(k) .. "=" .. describe(x, depth + 1) end
+    table.sort(parts)
+    return "{" .. table.concat(parts, ", ") .. "}"
 end
 
 -- ============================================================================
@@ -571,6 +581,7 @@ local function generate(ctx, plan, opts, log)
     -- AppendToTimeline, trying with and without mediaType (titles have no audio,
     -- and some builds reject one form or the other).
     local mediaTypeMode = nil
+    local lastAnswer = "no answer"
     local function place(track, record, endFrame)
         local modes = mediaTypeMode and { mediaTypeMode } or { "video", "any" }
         for _, mode in ipairs(modes) do
@@ -579,11 +590,37 @@ local function generate(ctx, plan, opts, log)
                 trackIndex = track, recordFrame = record,
             }
             if mode == "video" then info.mediaType = 1 end
-            local added = call(mediaPool, "AppendToTimeline", { info })
-            local item = type(added) == "table" and listOf(added)[1] or nil
+            local ok, added = pcall(function() return mediaPool:AppendToTimeline({ info }) end)
+            local item = ok and type(added) == "table" and listOf(added)[1] or nil
             if item then mediaTypeMode = mode return item end
+            lastAnswer = string.format("%s (mediaType %s)", ok and ("returned " .. describe(added)) or ("ERROR " .. tostring(added)),
+                mode == "video" and "1" or "omitted")
         end
         return nil
+    end
+
+    -- Re-runs the placement forms that worked in the Resolve 21 placement test,
+    -- on an empty track this run added, and logs Resolve's answer to each.
+    local function placementLadder(track, record, fullLen)
+        local forms = {
+            { "48 frames, no record frame", { startFrame = 0, endFrame = 47, trackIndex = track } },
+            { "48 frames at the clip start", { startFrame = 0, endFrame = 47, trackIndex = track, recordFrame = record } },
+            { "48 frames + mediaType 1", { startFrame = 0, endFrame = 47, trackIndex = track, recordFrame = record, mediaType = 1 } },
+            { fullLen .. " frames at the clip start", { startFrame = 0, endFrame = fullLen, trackIndex = track, recordFrame = record } },
+        }
+        log("\nPLACEMENT CHECK on V" .. track .. " (anything placed is removed again):")
+        for i, f in ipairs(forms) do
+            f[2].mediaPoolItem = opts.templateClip
+            local ok, added = pcall(function() return mediaPool:AppendToTimeline({ f[2] }) end)
+            local item = ok and type(added) == "table" and listOf(added)[1] or nil
+            local line = string.format("  %d. %-28s -> %s", i, f[1], ok and describe(added) or ("ERROR " .. tostring(added)))
+            if item then
+                line = line .. string.format("  PLACED start=%s dur=%s", tostring(call(item, "GetStart")), tostring(call(item, "GetDuration")))
+                call(timeline, "DeleteClips", { item }, false)
+            end
+            log(line)
+        end
+        log("  template: " .. tostring(call(opts.templateClip, "GetName")) .. "  " .. tostring(opts.templateClip))
     end
 
     -- endFrame is exclusive on Resolve 21 (0..47 gives 47 frames). If a build
@@ -690,9 +727,10 @@ local function generate(ctx, plan, opts, log)
         else
             result.failed = result.failed + 1
             log("  FAIL  " .. label .. ": " .. (err == REFUSED and "Resolve refused to place the template clip, even on a new empty track" or (err or "unknown error")))
+            if err == REFUSED then log("        Resolve's answer: " .. lastAnswer) end
             if err == REFUSED and result.created == 0 then
-                log("\nCheck that Title template is the Text+ you dragged from a timeline into the")
-                log("Media Pool, click Refresh, and try again. Stopping; nothing more was attempted.")
+                placementLadder(track, clip.start, clip.dur)
+                log("\nStopping; nothing was created. Please send this whole report.")
                 result.failed = #plan.titles
                 return result
             end
@@ -910,6 +948,12 @@ local function runUI(fusionApp)
             ctx.timeline = copy
             plan = buildPlan(ctx, opts)
             appendReport("Working on duplicate timeline: " .. newName)
+        end
+
+        -- Use a template object from this same connection, not the one cached when
+        -- the window opened.
+        for _, t in ipairs(findTemplates(ctx.mediaPool)) do
+            if t.label == opts.template then opts.templateClip = t.clip break end
         end
 
         appendReport("\nGENERATING")

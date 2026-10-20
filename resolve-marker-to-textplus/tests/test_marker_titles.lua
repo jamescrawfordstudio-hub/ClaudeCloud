@@ -124,5 +124,8 @@ check(onA == nil or higher ~= nil, "titles stay on separate tracks")
 check(src.start == 500 and #tlR.tracks[1] == 1, "source clip untouched")
 R.refuseTracks = nil
 
+local mk = { name = "Title", note = "Sub" }
+check(MT.markerText(mk, 4) == "Title\nSub", "name (new line) note")
+check(MT.markerText({ name = "Only", note = "" }, 4) == "Only", "new line option with empty note")
 print(failures == 0 and "\nALL TESTS PASSED" or ("\n" .. failures .. " FAILURE(S)"))
 os.exit(failures == 0 and 0 or 1)

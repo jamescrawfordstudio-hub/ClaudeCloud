@@ -1,5 +1,5 @@
 --[[
-    MarkerTitler  v1.3.0
+    MarkerTitler  v1.4.0
     Turns clip markers into Text+ title clips.
     DaVinci Resolve Studio 20.3 and 21.x (macOS; also runs on Windows/Linux)
 
@@ -26,7 +26,7 @@
 ]]
 
 local SCRIPT_NAME = "MarkerTitler"
-local SCRIPT_VERSION = "1.3.0"
+local SCRIPT_VERSION = "1.4.0"
 local TAG_PREFIX = "markertitles"
 local TAG_MARKER_COLOR = "Cream"
 local TAG_CLIP_COLOR = "Teal"
@@ -37,7 +37,7 @@ local MARKER_COLORS = {
     "Blue", "Cyan", "Green", "Yellow", "Red", "Pink", "Purple", "Fuchsia",
     "Rose", "Lavender", "Sky", "Mint", "Lemon", "Sand", "Cocoa", "Cream",
 }
-local TEXT_SOURCES = { "Marker name", "Marker note", "Name, or note if name is empty", "Name - Note" }
+local TEXT_SOURCES = { "Marker name", "Marker note", "Name, or note if name is empty", "Name - Note", "Name (new line) Note" }
 local EXISTING_MODES = { "Skip them", "Regenerate them" }
 
 local unpack = unpack or table.unpack
@@ -254,7 +254,7 @@ local function markerText(m, source)
     elseif source == 1 then return note
     elseif source == 2 then return name ~= "" and name or note
     end
-    if name ~= "" and note ~= "" then return name .. " - " .. note end
+    if name ~= "" and note ~= "" then return name .. (source == 4 and "\n" or " - ") .. note end
     return name ~= "" and name or note
 end
 

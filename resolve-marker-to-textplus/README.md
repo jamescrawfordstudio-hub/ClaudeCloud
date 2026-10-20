@@ -39,7 +39,7 @@ Scan / Preview shows the template's type and length, and warns you if it's too s
 2. Run **Workspace > Scripts > MarkerTitler**.
 3. Choose your options:
    - **Title template:** the Text+ clip in your Media Pool.
-   - **Text from:** the marker name, the note, the name falling back to the note, or "Name - Note".
+   - **Text from:** the marker name, the note, the name falling back to the note, "Name - Note", or "Name (new line) Note".
    - **Marker color:** only use markers of one color.
    - **First title track:** *Auto* puts titles just above each clip. You can also choose a minimum track number.
    - **Earlier titles:** on a re-run, either *Skip* markers that already have a title or *Regenerate* those titles.
